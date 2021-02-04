@@ -1,10 +1,13 @@
+# Get to know the working directory
+getwd()
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R/")
 # loading CrisprVariants GenomicAlignemts
 library(CrispRVariants)
 library(GenomicAlignments)
 library(rBLAST)
 library(ggmsa)
 # loading the crisprset object
-load("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R/CrisprSets_log_del.RData")
+load("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R/Data/CrisprSets_log_del.RData")
 # getting the crispr_set for NGN3
 crispr_set <- All_sets_long_del[[1]] 
 
@@ -35,5 +38,14 @@ cigar_bl04 <- sort(table(cigar_bl04),decreasing = T)
 most_frequent_chimera <- grep(names(cigar_bl04[1]), chimeras_bl04@cigar)
 seq_mf_chimera <- sequences[most_frequent_chimera][1]
 
-# we can then use blast to align the chimeras sequence to the reference sequence and figure it out if they are real duplicate or if we can align it to other parte of the genome
+# getting the DNA string of the most frequent chimera
 
+DNASt_mf_chimera <- 
+
+# I will try to use the ggmsa to align the read of the most frequent quimera to the target and off target 
+
+# Fist I will load the .fasta files of the reference genome for the target / off-target region
+ref_seq_long <- "./Data/ref_seq.fasta"
+
+
+# we can then use blast to align the chimeras sequence to the reference sequence and figure it out if they are real duplicate or if we can align it to other parte of the genome
