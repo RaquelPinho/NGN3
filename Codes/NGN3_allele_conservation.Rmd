@@ -1,0 +1,227 @@
+---
+title: "Allele conservation and analysis"
+author: "Raquel Pinho"
+date: "5/26/2020"
+output: 
+ html_document:
+   css: temp1.css
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## NGN3 variants analysis
+
+The analysis of the variantes of off target loci from NGN3 guides in porcines.The guide used was CCCGCGCAGCGCAUCCAACG.
+
+### Libraries used  
+
+I will use mainly the CrispRVariants package, for plotting ggplot2 and for importing the data rtracklayer.
+
+```{r libraries, echo = FALSE, include=FALSE}
+library("ggplot2")
+library("CrispRVariants")
+library("Rsamtools")
+library("gdata")
+library("rtracklayer")
+library("gridExtra")
+library("shiny")
+library("plotly")
+library("GenomicFeatures")
+library("reshape")
+library("wesanderson")
+library("dplyr")
+library("ggpubr")
+library("superheat")
+library("psych")
+```
+
+```{r functions, echo = FALSE, include=FALSE}
+import::here(.from = "D:/Raquel/Desktop/Post_doc/Codes/annotation_visualization_lib.R",
+             plotAnnotation_Mod,
+             arrangePlots,
+             mut.efficiency,
+             filter.alleles,
+             filter.allAlleles,
+             plotConservation,
+             Mut.eff.threshold,
+             Plot.Cum.dens,
+             Mut.eff.all.threshold,
+             MatrixSamples,
+             MissingSamples,
+             SumReadsPerSample,
+             GetStatsReads,
+             PlotReadPerGroup,
+             plotConservationSample,
+             layout_ggplotly,
+             meltedAlleleInfo,
+             filter.Alleles.allSamples,
+             plotMin_Allsamples,
+             Convert2Freq,
+             frequencyFilterAllSamples             )
+```
+
+
+### Samples and metadata 
+
+Samples from blastocysts derivides from IVF (BL) or parthenogenesis (PT) were analyzed with targeted sequencing for the target region (NGN3) and 7 predicted off-target sites (OF) 
+
+
+```{r set_samples, include=F, echo=FALSE}
+# Setting up the working directory
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+
+# Read samples files, each .bam file are the reads for all (target/offtarget) sites for one sample.
+readfiles<-list.files("./Bam")
+
+# Loading reference, GRange objects, trancript database and metadatas
+## I saved the fasta files with the reference sequences and the GRange objects of the target / off target regions in a .RData file
+load("./NGN3_cr_Robj.RData")
+## where gd is the GRange of the target regions,
+## amp_ranges is the GRanges of  the amplicon regions with seqlevels as the ncbi id in the transcript database
+## the references is a DNAStringSet, with the references sequences of the loci of target and off-target sites, 
+## locimetadata is a df with the information of the loci,
+## metadata is the metadata of the samples with the information of file paths and group information
+## vc_all_list list of readMatrix of variant counts per sample
+```
+
+## Variants per locus with threshold
+
+- The number of variants/alleles also varied greatly depending on the locus, probably because the the total number of reads as also much smaller. In the next slide we investigate the number of alleles per locus with and without filtering the reads. The filter was done removing 10% of the reads responsible for the lowest frequency alleles. 
+
+## Variants per locus with threshold
+```{r number_of_alleles}
+# doing data frame with general allele conservation, that is the number of unique alleles kept considering all samples
+## number of alleles with no filter
+n_variants_per_locus <- sapply(vc_all_list,FUN= function(x) {dim(x)[1]})
+## number of alleles after filtering with threshold 0.9
+n_variants_per_locus_thr <- sapply(seq_along(vc_all_list), FUN= function(i) {
+  length(
+    unique(
+      unlist(
+        apply(vc_all_list[[i]],2, FUN = function(x) {filter.alleles(x,0.9)})
+        )))
+})
+
+n_variantes_Freq_thr_6 <- sapply(lapply(vc_all_list,frequencyFilterAllSamples), length)
+n_variantes_Freq_thr_12 <- sapply(lapply(vc_all_list,frequencyFilterAllSamples,freq.threshold = 0.125 ), length)
+# Creating data frame with number of alleles per locus
+Table <- data.frame(Locus = names(vc_all_list), All_No_filter = n_variants_per_locus, All_Filtered = n_variants_per_locus_thr, Freq_filter_6 = n_variantes_Freq_thr_6, Freq_filter_12 = n_variantes_Freq_thr_12 )
+## Displaying on shiny
+# Now displyaing it in shiny
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+       h4("Allele conservation"),
+      tableOutput("table"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+ output$table <- renderTable({
+  Table
+ },height = 800, width = 800 )
+}
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+
+## Allele conservation per sample with threshold 
+
+- The number of variants/alleles also varied greatly depending on the sample, probably because the the total number of reads as also much smaller in the offtarget sites and in the mosaic groups. In the next slide we investigate the number of alleles conserved per locus per sample with and without filtering the reads. The filter was done removing 10% of the reads respnosible for the lowest frequency alleles. 
+
+
+## Allele conservation per sample with threshold 
+```{r number_of_alleles_sample,out.height = "110%", out.width = "120%"}
+# I will now calculate the number of alleles per sample  
+# Now displyaing it in shiny togethe with sample information
+ui <- fluidPage(
+  # define title of the panel
+  titlePanel("Allele conservation per sample"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples),
+      selectInput( inputId = "Locus", label = "Choose locus", choices = gd$names)),
+    # define output 
+    mainPanel(
+      tableOutput("tablesample"),
+      plotlyOutput("SampleConservation")
+      ))) 
+
+# define server logic options
+server <- function(input, output) {
+  InputN <- reactive({
+    vc_all <- vc_all_list[[input$Locus]]
+    n_allele <- length(which(vc_all[, input$Sample] > 0))
+    n_allele
+  })
+  InputCol <- reactive({
+    vc_all <- vc_all_list[[input$Locus]]
+    col <- vc_all[,input$Sample]
+    col
+  })
+  InputF <- reactive({
+    col <- InputCol()
+    n_allele_f <- length(filter.alleles(col,0.9))
+    n_allele_f
+  })
+  InputT <- reactive({
+    dt <- Table[Table$Locus == input$Locus,]
+    dt_sample <- data.frame(Locus = input$Locus, All_No_filter = dt$All_No_filter, All_Filtered = dt$All_Filtered, Sample_no_filter = InputN(), Sample_filter = InputF())
+  })
+  
+ output$tablesample <- renderTable({
+      InputT()
+})
+ output$SampleConservation <- renderPlotly({
+   py <-  ggplotly(plotConservationSample(InputCol()), height = 700, width = 1000)
+   layout_ggplotly(ggplotly(py))
+  })
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+## Minimum counts after filtering 
+
+- Here we can see the number of counts of the lowest frequency allele after filtering with threshold 0.9 for any given sample for a specific locus.
+
+##
+```{r min_read_counts_filtered,  out.height = "110%", out.width = "120%"  }
+# I will now calculate the number of alleles per sample  
+# Now displyaing it in shiny togethe with sample information
+ui <- fluidPage(
+  # define title of the panel
+  titlePanel("Number of reads of the allele with lowest frequency kept after filtering"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+        selectInput( inputId = "Locus", label = "Choose locus", choices = gd$names)),
+    # define output 
+    mainPanel(
+      plotlyOutput("minReadCounts")
+      ))) 
+
+# define server logic options
+server <- function(input, output) {
+  InputVC <- reactive({
+    vc_all <- vc_all_list[[input$Locus]]
+      })
+  
+ output$minReadCounts <- renderPlotly({
+  ggplotly(plotMin_Allsamples(InputVC()), height = 850, width = 600)
+  })
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```

@@ -1,0 +1,1 @@
+95c688b8336b244eea1b4c5204954140  GCF_000003025.6_Sscrofa11.1_genomic.gff.gz

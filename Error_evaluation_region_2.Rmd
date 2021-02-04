@@ -1,0 +1,536 @@
+---
+title: "Analysis of the error rate and allele conservation 300 bp up/dowastream of the cut site in the NGN3 gene"
+author: "Raquel Pinho"
+date: "8/3/2020"
+output: 
+ html_document:
+   css: temp1.css
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## NGN3 variants analysis
+
+The analysis of the variantes of off target loci from NGN3 guides in porcines.The guide used was CCCGCGCAGCGCAUCCAACG.
+
+### Libraries used  
+
+I will use mainly the CrispRVariants package, for plotting ggplot2 and for importing the data rtracklayer.
+
+```{r libraries, echo = FALSE, include=FALSE}
+library("shiny")
+library("ggplot2")
+library("CrispRVariants")
+library("Rsamtools")
+library("gdata")
+library("rtracklayer")
+library("gridExtra")
+library("shiny")
+library("plotly")
+library("GenomicFeatures")
+library("reshape")
+library("wesanderson")
+library("dplyr")
+library("ggpubr")
+library("superheat")
+library("psych")
+```
+
+```{r functions, echo = FALSE, include=FALSE}
+import::here(.from = "D:/Raquel/Desktop/Post_doc/Codes/annotation_visualization_lib.R",
+             plotAnnotation_Mod,
+             arrangePlots,
+             mut.efficiency,
+             filter.alleles,
+             filter.allAlleles,
+             plotConservation,
+             Mut.eff.threshold,
+             Plot.Cum.dens,
+             Mut.eff.all.threshold,
+             MatrixSamples,
+             MissingSamples,
+             SumReadsPerSample,
+             GetStatsReads,
+             PlotReadPerGroup,
+             plotConservationSample,
+             layout_ggplotly,
+             meltedAlleleInfo,
+             filter.Alleles.allSamples,
+             plotMin_Allsamples,
+             Convert2Freq,
+             frequencyFilterAllSamples,
+             frequencyFilterPerSample,
+             Target_position,
+             plotFreqConSample,
+             plotFreqConSample_error_ev,
+             meltedAlleleInfoFreqFiltered,
+             plotConThrSample_error_ev,
+             plotConservation_error_ev,
+             plotConThrSample_error_ev,
+             plotFreqCon_error_ev,
+             filt_up_down)
+```
+
+
+### Samples and metadata 
+
+Samples from blastocysts derivides from IVF (BL) or parthenogenesis (PT) were analyzed with targeted sequencing for the target region (NGN3) and 7 predicted off-target sites (OF). For this analysis I will run all samples for the target locus (NGN3) and the regions at the cut site, 300 bp up and downstream of the cut site.
+
+
+```{r set_samples, include=F, echo=FALSE}
+# Setting up the working directory
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+
+# Read samples files, each .bam file are the reads for all (target/offtarget) sites for one sample.
+readfiles<-list.files("./Bam")
+
+# Loading reference, GRange objects, trancript database and metadatas
+## I saved the fasta files with the reference sequences and the GRange objects of the target / off target regions in a .RData file
+load("./NGN3_cr_Robj.RData")
+## where gd is the GRange of the target regions,
+## amp_ranges is the GRanges of  the amplicon regions with seqlevels as the ncbi id in the transcript database
+## the references is a DNAStringSet, with the references sequences of the loci of target and off-target sites, 
+## locimetadata is a df with the information of the loci,
+## metadata is the metadata of the samples with the information of file paths and group information
+# Loading the data for the up/downstream regions that were created with the D:/Raquel/Desktop/Post_doc/Codes/Error_evaluation_region.r script function
+load("./Up_downstream_objects.RData")
+## where control_up/control_down is a list of sequences for the regions 300bp up/downstream of the cut site in the target and off target regions
+## where gd_up/gd_down is the GRange objects of the regions in control_up/control_down
+# target locus and sequence of guide binding region
+## Getting crispr_sets for the taget region and for the 300 bp upstream and downstream region of the cut
+load("./vc_all_list_up_down.RData") 
+## where vc_all_list is a list of readMatrix for the target. up and downstream regions
+## where target_loc is the cut locus for the target and off-target loci
+```
+
+## Creating variant counts for the target, upstream and downstream region
+
+```{r vc}
+# for the target region
+vc_all_target <- vc_all_list_up_down[["target"]]
+# for the uspstream region
+vc_all_up <- vc_all_list_up_down[["upstream"]]
+# for the downstream region
+vc_all_down <- vc_all_list_up_down[["downstream"]]
+
+
+```
+## Comparing the number of alleles and mutation frequency at the target, up and downstream regions.
+
+### Number of alleles with no filtering considering all samples
+
+```{r allele_number_all}
+# number of alleles
+## target 
+print(paste0("The number of alleles for the target region without filtering and considering all samples is"," ", nrow(vc_all_target)))
+
+## upstream 
+print(paste0("The number of alleles for the upstream region without filtering and considering all samples is"," ", nrow(vc_all_up)))
+
+## downstream 
+print(paste0("The number of alleles for the downstream region without filtering and considering all samples is"," ", nrow(vc_all_down)))
+```
+
+### Number of alleles with no filtering considering per sample
+
+```{r allele_number_per_sample}
+n_alleles_t <- apply(vc_all_target,2, FUN =  function(x) { x <- x[x>0]; return(length(x))})
+names(n_alleles_t) <- colnames(vc_all_target)
+n_alleles_up <- apply(vc_all_up,2, FUN =  function(x) { x <- x[x>0]; return(length(x))})
+names(n_alleles_up) <- colnames(vc_all_up)
+n_alleles_down <- apply(vc_all_down,2, FUN =  function(x) { x <- x[x>0]; return(length(x))})
+names(n_alleles_down) <- colnames(vc_all_down)
+df<- data.frame(cbind( alleles_target = n_alleles_t,total_reads_target =  apply(vc_all_target, 2,sum), alleles_up = n_alleles_up, total_reads_up = apply(vc_all_up, 2,sum), alleles_down = n_alleles_down, total_reads_down = apply(vc_all_down, 2,sum)))
+## 
+# Now displyaing it in shiny
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+       h4("Allele number per sample"),
+      DT::dataTableOutput("table"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+ output$table <- DT::renderDataTable({
+  df
+ },rownames = TRUE,height = 800, width = 800 )
+}
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+
+### Average Number of alleles with no filtering considering per region
+
+I will exclude the samples with 50% less reads in target region than in the average of the up and downstream region since they have probably a high frequence allele with a big deletion in the target site.
+
+```{r allele_number_per_region }
+# Getting reads 
+samples_longdel <- which(df$total_reads_target < ((df$total_reads_up + df$total_reads_down)/2)*0.5)
+Region <- rep(c("target","upstream", "downstream"), each = nrow(df))
+    dataPlot <- data.frame(Region =Region,Number_alleles = c(df$alleles_target,df$alleles_up,df$alleles_down), Samples = rep(rownames(df), 3))
+    dataPlot<- transform(dataPlot,Region = factor(Region, levels = c("upstream","target","downstream")))
+## 
+# Getting the mean
+mean <- apply(df[-samples_longdel,c(1,3,5)], 2, mean)
+# Now displyaing it in shiny
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+       h4("Samples with possible long deletions"),
+       textOutput("longdels"))
+  ),
+  fluidRow(
+    column(12, offset= 0, 
+      h4("Allele number per sample per region"),
+      plotOutput("barplot"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+   output$longdels <- renderText({
+   print(paste("The samples with probable long deletions are:",                     rownames(df)[samples_longdel[1]],rownames(df)[samples_longdel[2]],rownames(df)[samples_longdel[3]]))
+    })
+ output$barplot <- renderPlot({
+    p <- ggplot(dataPlot, aes( x= Samples,y = Number_alleles, fill = Region)) + 
+     scale_fill_manual(values = wes_palette("GrandBudapest1")[1:3]) +
+     geom_bar(stat = "identity") + geom_hline(yintercept = mean, color =  rep(wes_palette("GrandBudapest1")[c(2,1,3)],3)) + 
+     facet_wrap(~Region) + theme_pubr() + theme(axis.text.x = element_text(angle = 90,size = 6))
+    p
+    },height = 700, width = 1200 )
+ 
+}
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+## Distribution of number of alleles per region before filtering
+
+
+```{r allelecounts_distribution }
+# Now displyaing it in shiny
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+      h4("Number of Allele distribution"),
+      plotOutput("hist"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+    
+ output$hist <- renderPlot({
+    p <- ggplot(dataPlot, aes(Number_alleles, fill = Region)) + 
+     scale_fill_manual(values = wes_palette("GrandBudapest1")[1:3]) +
+     geom_density( alpha = 0.6) +  
+     theme_pubr() + theme(axis.text.x = element_text(angle = 90,size = 12))
+    p
+    },height = 700, width = 1200 )
+ 
+}
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+
+
+
+
+### Number of alleles after filtering (allele conservation 0.9, allele frequency 6.25%) considering all samples
+
+The number of variants/alleles also varied greatly depending on the target regions because the the total number of reads can be much smaller at the target regions in some of the samples maybe due to long insertions/deletions. In the next slide we investigate the number of alleles with and without filtering the reads in the 3 regions (upstream, target, downstream). The filter was done removing 10% of the reads responsible for the lowest frequency alleles or removing alleles with frequencies lower than 6.25%. 
+
+```{r number_of_alleles_filter}
+# doing data frame with general allele conservation, that is the number of unique alleles kept considering all samples
+vc_all_list <- list( target = vc_all_target, upstream = vc_all_up, downstream = vc_all_down)
+## number of alleles with no filter
+n_variants_per_locus <- sapply(vc_all_list,FUN= function(x) {dim(x)[1]})
+## number of alleles after filtering with threshold 0.9
+n_variants_per_locus_thr <- sapply(seq_along(vc_all_list), FUN= function(i) {
+  length(
+    unique(
+      unlist(
+        apply(vc_all_list[[i]],2, FUN = function(x) {filter.alleles(x,0.9)})
+        )))
+})
+
+n_variantes_Freq_thr_6 <- sapply(lapply(vc_all_list,frequencyFilterAllSamples), length)
+n_variantes_Freq_thr_12 <- sapply(lapply(vc_all_list,frequencyFilterAllSamples,freq.threshold = 0.125 ), length)
+# Creating data frame with number of alleles per locus
+Table <- data.frame(Region = names(vc_all_list), All_No_filter = n_variants_per_locus, All_Filtered = n_variants_per_locus_thr, Freq_filter_6 = n_variantes_Freq_thr_6, Freq_filter_12 = n_variantes_Freq_thr_12 )
+## Displaying on shiny
+# Now displyaing it in shiny
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+       h4("Allele conservation"),
+      tableOutput("table"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+ output$table <- renderTable({
+  Table
+ },height = 800, width = 800 )
+}
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+
+InputP <- reactive({
+  p1 <- plotConThrSample_error_ev(vc_all_list,sample = input$Sample)
+  p2 <- plotFreqConSample_error_ev(vc_all_list, sample = input$Sample)
+  list(p1,p2)
+})
+
+```
+
+### Plotting number alleles after filtering (allele conservation 0.9, allele frequency 6.25%) considering all samples.
+
+Comparing the tree regions all samples
+
+```{r number_of_alleles_filt_all, out.height = "110%", out.width = "120%"}
+
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+       h4("Allele number filtered"),
+      plotOutput("DataConservation"))
+  )
+)
+
+# define server logic options
+server <- function(input, output) {
+    p1 <- plotConservation_error_ev(vc_all_list)
+    p2 <- plotFreqCon_error_ev(vc_all_list)
+    
+  
+  output$DataConservation <- renderPlot({
+   gridExtra::grid.arrange(p1,p2,nrow= 1)}, height = 900, width = 1700)
+    
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+
+### Number of alleles after filtering (allele conservation 0.9, allele frequency 6.25%) per sample.
+
+The number of variants/alleles also varied greatly depending on the sample, probably because the the total number of reads as also much smaller in the target site. In the next slide we investigate the number of alleles conserved per region per sample with and without filtering the reads. The filter was done removing 10% of the reads responsible for the lowest frequency alleles of removing the alleles with frequencies lower than 6.25%. 
+
+
+```{r number_of_alleles_filt_sample, out.height = "110%", out.width = "120%"}
+# Getting the number of alleles kept after filtering alleles with frequency lower than 6.25%
+freqfil_list <- lapply(vc_all_list, meltedAlleleInfoFreqFiltered)
+names(freqfil_list) <- names(vc_all_list) 
+# I will now calculate the number of alleles per sample  
+# Now displyaing it in shiny togethe with sample information
+ui <- fluidPage(
+  # define title of the panel
+  titlePanel("Allele number per sample"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples)),
+    # define output 
+    mainPanel(
+      tableOutput("tablesample"),
+      plotOutput("SampleConservation")
+      ))) 
+
+# define server logic options
+server <- function(input, output) {
+  InputN <- reactive({
+    n_allele <- sapply(vc_all_list,function(m) length(which(m[, input$Sample] > 0)))
+    n_allele
+  })
+  InputCol <- reactive({
+    col <- lapply(vc_all_list,function(m) m[, input$Sample])
+    col <- lapply(col, function(c) c[c > 0])
+    
+  })
+  InputF <- reactive({
+    col <- InputCol()
+    n_allele_f <-sapply(col, function(c) length(filter.alleles(c,0.9)))
+    n_allele_f
+  })
+  InputFF <- reactive({
+    n_allele_ff <- sapply(freqfil_list, function(l) length(which(l$Sample == input$Sample)))
+  })
+  InputT <- reactive({
+    dt_sample <- data.frame(Region = names(vc_all_list), All_No_filter = Table$All_No_filter, All_Filtered =            Table$All_Filtered, Sample_no_filter = InputN(), Sample_filter_con = InputF(), Sample_filter_freq = InputFF())
+  })
+  InputP <- reactive({
+  p1 <- plotConThrSample_error_ev(vc_all_list,sample = input$Sample) 
+  p2 <- plotFreqConSample_error_ev(vc_all_list, sample = input$Sample)
+  list(p1,p2)
+  })
+  output$tablesample <- renderTable({
+      InputT()
+})
+  output$SampleConservation <- renderPlot({
+   gridExtra::grid.arrange(InputP()[[1]],InputP()[[2]],nrow= 1)}, height = 900, width = 1300)
+    
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+## Analysis by sample of number of alleles with ggplotly
+
+The number of alleles were filtrered with different freq.threshold.
+
+```{r number_of_alleles_filt_sample_ggplotly, out.height = "110%", out.width = "120%"}
+# Getting the number of alleles kept after filtering alleles with frequency lower than 6.25%
+freqfil_list <- lapply(vc_all_list, meltedAlleleInfoFreqFiltered)
+names(freqfil_list) <- names(vc_all_list) 
+# I will now calculate the number of alleles per sample  
+# Now displyaing it in shiny togethe with sample information
+ui <- fluidPage(
+  # define title of the panel
+  titlePanel("Allele number per sample"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples)),
+    # define output 
+    mainPanel(
+      tableOutput("tablesample"),
+      plotlyOutput("SampleConservation", height = 900, width = 1700)
+      ))) 
+
+# define server logic options
+server <- function(input, output) {
+  InputN <- reactive({
+    n_allele <- sapply(vc_all_list,function(m) length(which(m[, input$Sample] > 0)))
+    n_allele
+  })
+  InputCol <- reactive({
+    col <- lapply(vc_all_list,function(m) m[, input$Sample])
+    col <- lapply(col, function(c) c[c > 0])
+    
+  })
+  InputF <- reactive({
+    col <- InputCol()
+    n_allele_f <-sapply(col, function(c) length(filter.alleles(c,0.9)))
+    n_allele_f
+  })
+  InputFF <- reactive({
+    n_allele_ff <- sapply(freqfil_list, function(l) length(which(l$Sample == input$Sample)))
+  })
+  InputT <- reactive({
+    dt_sample <- data.frame(Region = names(vc_all_list), All_No_filter = Table$All_No_filter, All_Filtered =            Table$All_Filtered, Sample_no_filter = InputN(), Sample_filter_con = InputF(), Sample_filter_freq = InputFF())
+  })
+  InputP <- reactive({
+  p2 <- plotFreqConSample_error_ev(vc_all_list, sample = input$Sample)
+  p2
+  })
+  output$tablesample <- renderTable({
+      InputT()
+})
+  output$SampleConservation <- renderPlotly({
+   InputP()})
+    
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+
+## Filtering proposal of using up and downstream region as reference for back ground control
+
+Since each sample (blastocyst) can only have up to two alleles on each region with minimal frequency of 30% (accounting for PCR bias), I will use as cut-off the frequency that removes the background from the up/downstream region on the same sample. I will not use thisapproach for the samples with possible long deletions BL02,BL04 and BL15.
+
+```{r filtering_up_down }
+# Now displyaing it in shiny
+## Getting the alleles list after background is removed
+list_alleles <- lapply(metadata$Samples, FUN = function(s) filt_up_down(vc_all_list, Sample = s))
+names(list_alleles) <-metadata$Samples
+df_filter <- lapply(seq_along(list_alleles), function(i) {
+  dt_filter <- data.frame(Samples = names(list_alleles)[i], target = length(list_alleles[[i]]$target), upstream = length(list_alleles[[i]]$upstream),downstream = length(list_alleles[[i]]$downstream))
+})
+df_filter <- do.call(rbind,df_filter)
+
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+      h4("Number of Allele distribution"),
+      plotOutput("hist"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+    dataPlot <- melt(df_filter, id.vars = "Samples", variable_name = "Region")
+    names(dataPlot)[3] <- "Number_alleles"
+    dataPlot<- transform(dataPlot,Region = factor(Region, levels = c("upstream","target","downstream")))
+ output$hist <- renderPlot({
+    p <- ggplot(dataPlot, aes(Number_alleles, fill = Region)) + 
+     scale_fill_manual(values = wes_palette("GrandBudapest1")[1:3]) +
+     geom_density( alpha = 0.6) +  
+     theme_pubr() + theme(axis.text.x = element_text(angle = 90,size = 12))
+    p
+    },height = 700, width = 1200 )
+ 
+}
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+### Average Number of alleles with filtered considering per region
+
+I will exclude the samples with 50% less reads in target region than in the average of the up and downstream region since they have probably a high frequence allele with a big deletion in the target site.
+
+```{r hist_filt }
+ 
+# Getting the mean
+mean <- apply(df[-samples_longdel,c(1,3,5)], 2, mean)
+mean2 <- apply(df_filter[-samples_longdel,2:4],2,mean)
+# Now displyaing it in shiny
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+       h4("Samples with possible long deletions"),
+       textOutput("longdels"))
+  ),
+  fluidRow(
+    column(12, offset= 0, 
+      h4("Allele number per sample per region"),
+      plotOutput("barplot"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+    #data before filtering
+    dataPlot1 <-dataPlot
+    #data after filtering 
+    dataPlot2 <- melt(df_filter, id.vars = "Samples", variable_name = "Region")
+    names(dataPlot2)[3] <- "Number_alleles"
+    #format factor
+    dataPlot2<- transform(dataPlot2,Region = factor(Region, levels = c("upstream","target","downstream")))
+     output$longdels <- renderText({
+   print(paste("The samples with probable long deletions are:",                     rownames(df)[samples_longdel[1]],rownames(df)[samples_longdel[2]],rownames(df)[samples_longdel[3]]))
+    })
+ output$barplot <- renderPlot({
+   p1 <- ggplot(dataPlot1, aes( x= Samples,y = Number_alleles, fill = Region)) + geom_bar(stat = "identity") +  scale_fill_manual(values = wes_palette("GrandBudapest1")[1:3]) + geom_hline(yintercept = mean, color =  rep(wes_palette("GrandBudapest1")[c(2,1,3)],3)) + facet_wrap(~ Region) +  theme_pubr() + theme(axis.text.x = element_text(angle = 90,size = 6))
+    p2 <- ggplot(dataPlot2, aes( x= Samples,y = Number_alleles, fill = Region)) + geom_bar(stat = "identity") +  scale_fill_manual(values = wes_palette("GrandBudapest1")[1:3]) + geom_hline(yintercept = mean2, color =  rep(wes_palette("GrandBudapest1")[c(2,1,3)],3)) + facet_wrap(~ Region) +  theme_pubr() + theme(axis.text.x = element_text(angle = 90,size = 6))
+    grid.arrange(p1,p2, nrow =2)
+    },height = 700, width = 1200 )
+ 
+}
+# Run the application 
+shinyApp(ui = ui, server = server)

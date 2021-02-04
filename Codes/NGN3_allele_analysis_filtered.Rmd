@@ -1,0 +1,178 @@
+---
+title: "Allele_analysis_filtered"
+author: "Raquel Pinho"
+date: "5/27/2020"
+output: 
+ html_document:
+   css: temp1.css
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## NGN3 variants analysis
+
+The analysis of the variantes of off target loci from NGN3 guides in porcines.The guide used was CCCGCGCAGCGCAUCCAACG.
+
+### Libraries used  
+
+I will use mainly the CrispRVariants package, for plotting ggplot2 and for importing the data rtracklayer.
+
+```{r libraries, echo = FALSE, include=FALSE}
+library("ggplot2")
+library("CrispRVariants")
+library("Rsamtools")
+library("gdata")
+library("rtracklayer")
+library("gridExtra")
+library("shiny")
+library("plotly")
+library("GenomicFeatures")
+library("reshape")
+library("wesanderson")
+library("dplyr")
+library("ggpubr")
+library("superheat")
+library("psych")
+library("circlize")
+```
+
+```{r functions, echo = FALSE, include=FALSE}
+import::here(.from = "D:/Raquel/Desktop/Post_doc/Codes/annotation_visualization_lib.R",
+             plotAnnotation_Mod,
+             arrangePlots,
+             mut.efficiency,
+             filter.alleles,
+             filter.allAlleles,
+             plotConservation,
+             Mut.eff.threshold,
+             Plot.Cum.dens,
+             Mut.eff.all.threshold,
+             MatrixSamples,
+             MissingSamples,
+             SumReadsPerSample,
+             GetStatsReads,
+             PlotReadPerGroup,
+             plotConservationSample,
+             layout_ggplotly,
+             meltedAlleleInfo,
+             filter.Alleles.allSamples,
+             plotMin_Allsamples,
+             getAlleleType,
+             getDTcirclize,
+             VizCirclize,frequencyFilterPerSample)
+```
+
+
+### Samples and metadata 
+
+Samples from blastocysts derivides from IVF (BL) or parthenogenesis (PT) were analyzed with targeted sequencing for the target region (NGN3) and 7 predicted off-target sites (OF) 
+
+```{r set_samples, include=F, echo=FALSE}
+# Setting up the working directory
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+
+# Read samples files, each .bam file are the reads for all (target/offtarget) sites for one sample.
+readfiles<-list.files("./Bam")
+
+# Loading reference, GRange objects, trancript database and metadatas
+## I saved the fasta files with the reference sequences and the GRange objects of the target / off target regions in a .RData file
+load("./NGN3_cr_Robj.RData")
+## where gd is the GRange of the target regions,
+## amp_ranges is the GRanges of  the amplicon regions with seqlevels as the ncbi id in the transcript database
+## the references is a DNAStringSet, with the references sequences of the loci of target and off-target sites, 
+## locimetadata is a df with the information of the loci,
+## metadata is the metadata of the samples with the information of file paths and group information
+```
+
+
+## Variant frequency per sample after filtering 
+
+Here I consider only the alleles kept after the filtering with threshold of data conservation 0.9
+
+```{r var_freq_filtered, out.height = "110%", out.width = "100%"}
+#define palette
+pal_mutations <- c('SNV' = "#F1BB7B", 'Insertion' = "#FD6467", 'Deletion' = "#5B1A18", 'Mixed' = "lavenderblush3", 'Reference' = "#b3e2cd", 'Other' = "lightseagreen")
+  
+# Now displyaing it in shiny
+ui3 <- fluidPage(
+    # define title of the panel
+    titlePanel("Variant frequency"),
+    # define input
+    sidebarLayout( 
+      sidebarPanel( 
+            selectInput(inputId = "Locus", label = "Choose target / off-target (OF) region", choices = gd$names),
+            selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples)),
+    
+    # define output 
+    mainPanel(
+      tableOutput("table"),
+        plotOutput("lollipop")
+         )))
+# define server logic options
+server3 <- function(input, output) {
+      InputS <- reactive({
+      vc_all <- vc_all_list[[input$Locus]]
+      vc_filtered_list <- filter.Alleles.allSamples(vc_all)
+      Sample_info <- vc_filtered_list[[input$Sample]]
+      dt <- data.frame(Alleles = names(Sample_info), Counts = Sample_info, Frequency = Sample_info/sum(Sample_info))
+      dt <- dt %>% mutate(Type = sapply(Alleles, getAlleleType)) %>% mutate(Type = factor(Type, levels = c("SNV", "Insertion", "Deletion","Mixed", "Reference", "Other")))
+      dt
+    })
+      output$table <- renderTable({
+        n<-ifelse(nrow(InputS())<5,nrow(InputS()),5)
+        InputS()[order(InputS()$Frequency,decreasing = TRUE)[1:n],]
+      })
+       output$lollipop <-renderPlot({
+     p <- ggdotchart(InputS(), x = 'Alleles', y = 'Frequency', col = "Type", group = "Type", sort = 'descending', add = 'segments', rotate = TRUE, add.params = list(color = "Type", size = 1.5), label = round(InputS()$Frequency, 1), font.label = list(color = "white", size = 9, vjust = 0.4), dot.size = 6)+ scale_color_manual(values = pal_mutations, drop = FALSE) 
+     p
+     }, height = 780, width = 700 )
+} 
+    
+# Run the application 
+shinyApp(ui = ui3, server = server3)
+```
+
+## Visualization of variant frequency  in chord diagram
+
+Here I am considering frequency greater than 0.0001 for off target samples since the number of alleles for the target locus is too big to plot in chord plot with all samples present. The samples were filtered with conservation data threshold 0.9 
+
+```{r var_freq_chord, out.height = "110%", out.width = "100%"}
+#define palette
+pal_mutations <- c('SNV' = "#F1BB7B", 'Insertion' = "#FD6467", 'Deletion' = "#5B1A18", 'Mixed' = "lavenderblush3", 'Reference' = "#b3e2cd", 'Other' = "lightseagreen")
+  
+# Now displyaing it in shiny
+ui3 <- fluidPage(
+    # define title of the panel
+    titlePanel("Variant frequency"),
+    # define input
+    sidebarLayout( 
+      sidebarPanel( 
+        selectInput(inputId = "Locus", label = "Choose off-target (OF) region", choices = gd$names[-1]),
+        sliderInput(inputId = "freq", label = "Frequency threshold", min = 0.001, max = 1,step = 0.001, value = 0.001, round = F),
+        radioButtons("no_variant", label = "Show no variants?",choices = c("yes","no"), selected = "no")),
+    
+    # define output 
+    mainPanel(
+        plotOutput("chord")
+         )))
+# define server logic options
+server3 <- function(input, output) {
+      InputS <- reactive({
+      vc_all <- vc_all_list[[input$Locus]]
+      })
+      InputN <- reactive({
+        nov  <- ifelse(input$no_variant == "yes", TRUE, FALSE )
+      })
+      output$chord <-renderPlot({
+     p <- VizCirclize(readMatrix = InputS(), metadata$Group, freq.threshold = input$freq, show_no_variants = InputN())
+     p
+     }, height = 800, width = 800 )
+} 
+    
+# Run the application 
+shinyApp(ui = ui3, server = server3)
+```

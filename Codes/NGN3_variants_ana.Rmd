@@ -1,0 +1,169 @@
+---
+title: "NGN3 variant analysis"
+author: "Raquel Pinho"
+date: "4/1/2020"
+output:
+  html_document:
+        toc: true
+        toc_depth: 2
+        toc_float: 
+              collapsed: false
+        number_sections: true
+        fig.width: 11
+        fig.height: 9
+        fig.caption: true
+        dev: png
+        df_print: paged
+        code_folding: hide
+        self_contained: false
+        keep_md: true
+  word_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+# NGN3 variants analysis
+
+The analysis of the variantes of off target loci from NGN3 guides in porcines.The guide used was CCCGCGCAGCGCAUCCAACG.
+
+# Load libraries 
+
+I will use mainly the CrispRVariants package, for plotting ggplot2 and for importing the data Rsamtools.
+
+```{r libraries, echo FALSE}
+library(ggplot2)
+library(CrispRVariants)
+library("Rsamtools")
+library("gdata")
+library(rtracklayer)
+library(gridExtra)
+library(knitr)
+```
+
+# Setting directory and samples
+
+```{r setup}
+knitr::opts_knit$set(root.dir = "D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+readfiles<-list.files("./Bam")
+Samples <- gsub(".sort.bam", "", readfiles)
+Files <- file.path("./Bam",readfiles)
+Group[grep("PTM",readfiles)] <- "Partenotes_M" 
+Group[grep("BL",readfiles)] <- "Blastocysts" 
+Group[grep("BLM",readfiles)] <- "Blastocysts_M" 
+Group[grep("CL",readfiles)] <- paste0(Group[grep("CL",readfiles)], "_CL")  
+metadata <- data.frame (Samples, Files = as.character(Files), Group)
+
+
+gd_test2 <-"guide_rg.bed"
+gd2 <- rtracklayer::import(gd_test2)
+
+references2<-readDNAStringSet(filepath = "./target_rg.fasta",format = "fasta", use.names = TRUE)
+x2<-references2[1]
+x3<-reverseComplement(x2)
+
+if(!identical(width(references2),width(gd2))) {
+  start(gd2) <- (start(gd2) - 1)
+}
+# range metadata
+gd2$names <-gsub(":.*","",as.character(seqnames(gd2)))
+gd2$feature <- c( "gene", "Unknown", "gene","Intergenic","gene","gene", "Intergenic","Intergenic")
+gd2$genes_names <- c("NGN3","Unknown", "RAPGEF1", "Intergenic","KCNH6", "SERTAD3","Intergenic","Intergenic")
+gd2$chrm <- paste0(rep("chr",8), c(14, 6, 1, 4, 12, 6, 15, 7))
+strand(gd2) <- c("-",rep ("+", length(gd2)-1))
+```
+
+
+# Analysis of individual sample/loci combination
+
+
+
+```{r variant_analysis}
+crispr_set <- readsToTarget(reads ="./Bam/BL01.sort.bam", target = gd2[1], reference = x2, target.loc = 20)
+crispr_set3_all <- readsToTarget(reads = file.path(metadata$Files), target = gd2[1], reference = x2, target.loc = 20, group = metadata$Group)
+#trying with the txgff
+crispr_set <- readsToTarget(reads ="./Bam/BL01.sort.bam", target = gd2[1], reference = x2, target.loc = 20)
+crispr_set3_all <- readsToTarget(reads = file.path(metadata$Files), target = gd2[1], reference = x2, target.loc = 31, group = metadata$Group, orientation ="opposite")
+
+
+
+crispr_set4 <- readsToTarget("./Bam/BL01.sort.bam", target = gd2[1], reference = x2, target.loc = 13, orientation = "opposite")
+crispr_set4 <- readsToTarget("./Bam/BL01.sort.bam", target = gd2[1], reference = x2, target.loc = 31, orientation = "opposite")
+crispr_set3
+crispr_set4
+```
+
+```{r plotVariants}
+p <- plotVariants(crispr_set3, gene.text.size = 8,
+row.ht.ratio = c(1,8), col.wdth.ratio = c(4,2),
+plotAlignments.args = list(line.weight = 1, ins.size = 2,
+legend.symbol.size = 4),
+plotFreqHeatmap.args = list(plot.text.size = 4, x.size = 8, group = metadata$Group[1],
+legend.text.size = 8,
+legend.key.height = grid::unit(0.5, "lines")))
+plot(p)
+
+p <- plotVariants(crispr_set4,txdb = tbng, gene.text.size = 8,
+row.ht.ratio = c(1,8), col.wdth.ratio = c(4,2),
+plotAlignments.args = list(line.weight = 1, ins.size = 2,
+legend.symbol.size = 4),
+plotFreqHeatmap.args = list(plot.text.size = 4, x.size = 8, group = metadata$Group[1],
+legend.text.size = 8,
+legend.key.height = grid::unit(0.5, "lines")))
+plot(p)
+# Testing of ploting with gtf file, that I extracted from Ensembl website for the gene NGN3
+gtf <- "NGN3.gtf"
+NGN3 <- read_delim("NGN3.gtf", "\t", escape_double = FALSE, 
++     trim_ws = TRUE)
+metadata_gene <- NGN3[1,]
+metadata_gene[1]<- as.character(seqnames(gd2[1]))
+metadata_gene$gene_id <-"ENSSSCG00000034488"
+metadata_gene$transcript_id <- 
+metadata_gene$gene_name <- "neurogenin 3"
+txdb <- GenomicFeatures::makeTxDbFromGFF(gtf, format = "gtf")
+for( i in names(metadata(gr))) {
+  gr[[i]] <- metadata_gene[[i]]
+  
+}
+
+#testing for plottin with all samples 
+p <- plotVariants(crispr_set3_all, gene.text.size = 8,
+row.ht.ratio = c(1,8), col.wdth.ratio = c(4,2),
+plotAlignments.args = list(line.weight = 1, ins.size = 2,
+legend.symbol.size = 4),
+plotFreqHeatmap.args = list(plot.text.size = 4, x.size = 8, group = metadata$Group,
+legend.text.size = 8,
+legend.key.height = grid::unit(0.5, "lines")))
+plot(p)
+
+
+
+
+```
+
+```{r }
+# Calculating mutation fre
+eff<-mutationEfficiency(crispr_set3)
+eff
+```
+
+```{r variant_analysis}
+gd_test <-"test1.bed"
+gd <- rtracklayer::import(gd_test)
+references<-readDNAStringSet(filepath = "./test1.fa",format = "fasta", use.names = TRUE)
+x<-references[1]
+crispr_set <- readsToTarget("./Bam/BL01.sort.bam", target = gd, reference = x, target.loc = 20)
+undebug(readsToTarget)
+crispr_set
+
+```
+
+
+```{r }
+at <-ranges(gd)
+min(start(gd))
+max(end(gd))
+664 >= 663 && 705 <= 705
+
+
+```

@@ -1,0 +1,399 @@
+---
+title: "NGN3 project - Variant frequency and allele conservation"
+author: "Raquel Pinho"
+date: "5/26/2020"
+output: 
+ html_document:
+   css: temp1.css
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## NGN3 variants analysis
+
+The analysis of the variantes of off target loci from NGN3 guides in porcines.The guide used was CCCGCGCAGCGCAUCCAACG.
+
+### Libraries used  
+
+I will use mainly the CrispRVariants package, for plotting ggplot2 and for importing the data rtracklayer.
+
+```{r libraries, echo = FALSE, include=FALSE}
+library("ggplot2")
+library("CrispRVariants")
+library("Rsamtools")
+library("gdata")
+library("rtracklayer")
+library("gridExtra")
+library("shiny")
+library("plotly")
+library("GenomicFeatures")
+library("reshape")
+library("wesanderson")
+library("dplyr")
+library("ggpubr")
+library("superheat")
+library("psych")
+```
+
+```{r functions, echo = FALSE, include=FALSE}
+import::here(.from = "D:/Raquel/Desktop/Post_doc/Codes/annotation_visualization_lib.R",
+             plotAnnotation_Mod,
+             arrangePlots,
+             mut.efficiency,
+             filter.alleles,
+             filter.allAlleles,
+             plotConservation,
+             Mut.eff.threshold,
+             Plot.Cum.dens,
+             Mut.eff.all.threshold,
+             MatrixSamples,
+             MissingSamples,
+             SumReadsPerSample,
+             GetStatsReads,
+             PlotReadPerGroup)
+```
+
+
+### Samples and metadata 
+
+Samples from blastocysts derivides from IVF (BL) or parthenogenesis (PT) were analyzed with targeted sequencing for the target region (NGN3) and 7 predicted off-target sites (OF) 
+
+
+```{r set_samples, include=F, echo=FALSE}
+# Setting up the working directory
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+
+# Read samples files, each .bam file are the reads for all (target/offtarget) sites for one sample.
+readfiles<-list.files("./Bam")
+
+# Loading reference, GRange objects, trancript database and metadatas
+## I saved the fasta files with the reference sequences and the GRange objects of the target / off target regions in a .RData file
+load("./NGN3_cr_Robj.RData")
+## where gd is the GRange of the target regions,
+## amp_ranges is the GRanges of  the amplicon regions with seqlevels as the ncbi id in the transcript database
+## the references is a DNAStringSet, with the references sequences of the loci of target and off-target sites, 
+## locimetadata is a df with the information of the loci,
+## metadata is the metadata of the samples with the information of file paths and group information
+# Loading the list of the CristrSet for the loci in the sequencing
+load(file = "./CrisprSets.RData")
+#list2env(All_sets, envir=.GlobalEnv)
+
+```
+
+
+## Variant frequency at the target site by group 
+
+- The allele and mutation frequency was calculated using the CrispRVariants 
+- 1 control (CL) sample for the blastocysts and one control for the parthenotes 
+- Displaying alleles with more the 10% frequency
+- Samples were diveded in 4 groups: Blastocysts, Blastocysts_M (potencially mosaic), Partenotes_M ( potencially mosaic), Controls. The controls samples are also going to be presented when a group that is not control is chosen.
+
+## 
+```{r freq_group, out.height = "110%", out.width = "110%"}
+ui2 <- fluidPage(
+    # define title of the panel
+    titlePanel("Group"),
+    # define input
+    sidebarLayout( 
+      sidebarPanel( 
+            selectInput(inputId = "Locus", label = "Choose target / off-target (OF) region", choices = gd$names),
+            selectInput( inputId = "Group", label = "Choose group", choices = unique(metadata$Group))),
+    # define output 
+    mainPanel(
+        plotOutput("heat_s_plot")
+    )))
+# define server logic options
+server2 <- function(input, output) {
+    InputG <-  reactive({
+        switch(input$Group, unique(metadata$Group))
+            })
+    InputS <- reactive({
+      samples_dt <- metadata[which(metadata$Samples %in% colnames(vc_all_list[[input$Locus]])),]
+      order <- unique(c(which(samples_dt$Group %in% input$Group), which(samples_dt$Group == "Control")))
+    })
+    InputL <- reactive({
+      get(paste0("crisprset_", input$Locus))
+    })
+    InputL2 <- reactive({
+      set <- paste0("crisprset_", input$Locus)
+      All_sets[[set]]
+    }) 
+    output$heat_s_plot <-renderPlot({
+        plotFreqHeatmap(InputL2(), min.freq = 0.1, order = InputS(), plot.text.size = 4, legend.text.size = 12, x.hjust = 1 )
+            }, height = 750, width = 700)
+}
+
+# Run the application 
+shinyApp(ui = ui2, server = server2)
+
+```
+
+## Variant frequency at the target site by sample
+
+- The allele and mutation frequency was calculated using the CrispRVariants 
+- The GCF_000003025.6_Sscrofa11.1_genomic database downloaded from the NCBI. 
+- 1 control (CL) sample for the blastocysts and one control for the parthenotes 
+- Displaying alleles with more the 10% frequency
+
+## 
+```{r freq_sample, out.height = "110%", out.width = "110%"}
+ui2 <- fluidPage(
+    # define title of the panel
+    titlePanel("Samples"),
+    # define input
+    sidebarLayout( 
+      sidebarPanel( 
+            selectInput(inputId = "Locus", label = "Choose target / off-target (OF) region", choices = gd$names),
+            selectInput( inputId = "Samples", label = "Choose sample", choices = unique(metadata$Samples), multiple = TRUE)),
+    # define output 
+    mainPanel(
+        plotOutput("heat_s_plot")
+    )))
+# define server logic options
+server2 <- function(input, output) {
+    Input <-  reactive({
+        switch(input$Samples, metadata$Samples)
+            })
+    InputS <- reactive({
+      order <- which(colnames(vc_all_list[[input$Locus]]) %in% input$Samples)
+    })
+    InputC <- reactive({
+      get(paste0("crisprset_", input$Locus))
+    })
+    InputC2 <- reactive({
+      set <- paste0("crisprset_", input$Locus)
+      All_sets[[set]]
+    }) 
+    output$heat_s_plot <- renderPlot({
+        plotFreqHeatmap(InputC2(), min.freq = 0.1, order = InputS(), plot.text.size = 4, legend.text.size = 12, x.hjust = 1 )
+            }, height = 750, width = 800)
+}
+
+# Run the application 
+shinyApp(ui = ui2, server = server2)
+
+```
+
+## Variant Frequency
+
+- The variant/allele frequency is correlated with the read counts corresponding to that allele.
+
+- It renders clearer visualization since there is a big variance in total number of reads per sample.
+
+##
+```{r var_freq, out.height = "110%", out.width = "120%"}
+#define palette
+palette <- wes_palette("GrandBudapest1",3)
+# Now displyaing it in shiny
+ui3 <- fluidPage(
+    # define title of the panel
+    titlePanel("Locus Variance"),
+    # define input
+    sidebarLayout( 
+      sidebarPanel( 
+            selectInput(inputId = "Locus", label = "Choose target / off-target (OF) region", choices = gd$names)),
+    
+    # define output 
+    mainPanel(
+        plotOutput("superheat"),
+         )))
+# define server logic options
+server3 <- function(input, output) {
+      InputV <- reactive({
+
+      vc_all <-vc_all_list[[input$Locus]]
+      total_reads <-apply(vc_all,2,sum)
+      vcc <- sweep(vc_all, 2,total_reads , '/')
+      #Getting the alleles / variants with total frequency (considering all samples) greater than 0.1 (10%)
+      freq_0.1 <- apply(vcc, 1, sum)
+      freq_0.1 <- freq_0.1 > 0.1
+      vcc_0.1 <- vcc[freq_0.1,]
+      vcc_0.1 <- signif(vcc_0.1, digits = 2) 
+      rownames(vcc_0.1)[1] <- "No variant"
+      vcc_0.1
+     
+        })
+
+      InputT <- reactive({
+
+      X.text = ifelse(InputV() > 0.1, signif(InputV(), digits = 1), paste(" "))
+
+    })
+
+      InputO <- reactive({
+
+        order <- order(1:nrow(InputV()), decreasing = T)
+      })
+
+     output$superheat <-renderPlot({
+     
+       superheat(InputV(), order.rows = InputO(), heat.pal = palette, heat.lim = c(0.01,1), heat.na.col = "#b3e2cd",left.label.col = "lavenderblush1", left.label.size = 0.1, left.label.text.size = 4, bottom.label.size = 0.2, bottom.label.text.size = 4, bottom.label.text.angle = 90, bottom.label.col = "lavenderblush1", title = "Variants frequencies" ,title.alignment = "center", row.title = "Variants", column.title = "Samples", X.text = InputT() , X.text.size = 2.6, X.text.col = ifelse(InputV() > 0.6,"white","black"))
+            }, height = 900, width = 1200)
+} 
+    
+
+# Run the application 
+shinyApp(ui = ui3, server = server3)
+```
+
+## Mutation Efficiency
+
+- Mutation Frequency is calculated by dividing the sum of all reads with alleles non-SNV by the total reads. I will also exclude the reads occouring in the control since they might be sequencing error.
+
+- I also sed the log10 of the frequencies of each allele to create a violin plot. I used the log10 because the majority of the alleles had 0 reads for any given sample.
+
+##
+
+```{r mut_efficiency}
+#define palette
+palette <- wes_palette("GrandBudapest1",3)
+# Now displyaing it in shiny
+ui <- fluidPage(
+  # define title of the panel
+  titlePanel("Mutation Efficiency"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples),
+      selectInput( inputId = "Locus", label = "Choose locus", choices = gd$names),
+      sliderInput(inputId = "log10", label = "Log10(frequency)", min = -4, max = 0,step = 0.1, value = -1, round = F)),
+    # define output 
+    mainPanel(
+      tableOutput("table"),
+      textOutput("frequency"),
+      plotOutput("violin"),
+            )))
+# define server logic options
+server <- function(input, output) {
+  #loading crisprset 
+  InputCR <- reactive({
+      get(paste0("crisprset_", input$Locus))
+    })
+  InputCR2 <- reactive({
+      set <- paste0("crisprset_", input$Locus)
+      All_sets[[set]]
+    }) 
+  #creating mutation efficiency table  
+  InputM <- reactive({
+    mt_data <- mut.efficiency(InputCR2())
+    })
+ 
+  # creating data frame for the violin plot
+  p_df <- reactive({ 
+        # selecting sample
+    dt <- InputM()[[2]]
+    match <- c(input$Sample, "BLCL","PTMCL")
+    match <- unique(grep(paste(match,collapse="|"), 
+                       colnames(dt), value=TRUE))
+    ptable <- melt(as.data.frame(dt[, match]))
+    ptable$log10 <- log10(ptable$value)
+    colnames(ptable) <- c("Sample","Freq","Log10")
+    ptable
+  })
+
+output$table <-renderTable({
+  #creating table with only info of interest
+  table <- InputM()[[1]][, which(colnames(InputM()[[1]]) %in% c(input$Sample, "Min", "Mean", "Max")) ]
+  table
+  }, rownames = TRUE)
+  output$frequency <- renderPrint({
+  print(10^input$log10)
+})
+output$violin <- renderPlot({
+  ggviolin(p_df(), "Sample", "Log10", color = "black" , fill = "Sample", palette = palette)
+}, height = 550, width = 600)
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+## Mutation frequencing with read counts threshold
+
+- I choose a threshold (0.9) for removing 10% of the reads accounting for the alleles with lower frequencing before calculating the mutation frequency since I think that this method accounts for the sequencing eros without considering the reads from the controls as reference for the error removal from the other samples since the error is supousedly random and there were more than 8000 alleles more then 99 % of them with zero reads for a given sample. The mutation eff, min, max and sd were calculation not accounting for the control samples.
+
+- The conservation of read counts and the allele conservation per thrshold level 
+
+## Allele conservation per locus
+```{r mu_eff_thr, out.height = "110%", out.width = "120%" }
+# Now displyaing it in shiny
+ui <- fluidPage(
+  # define title of the panel
+  titlePanel("Mutation Efficiency"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples),
+      selectInput( inputId = "Locus", label = "Choose locus", choices = gd$names)),
+    # define output 
+    mainPanel(
+      tableOutput("table"),
+      plotOutput("Conservation"),
+      )))
+# define server logic options
+server <- function(input, output) {
+      # Getting functions to create mutation efficiency table and plot
+    InputM  <- reactive({ 
+        # selecting sample
+    mut_eff <- Mut.eff.all.threshold(colname= input$Sample, readMatrix = vc_all_list[[input$Locus]])
+    })
+
+output$table <-renderTable({
+  #creating table with only info of interest
+  InputM()
+  }, rownames = FALSE)
+
+output$Conservation <- renderPlot({
+  plotConservation(vc_all_list[[input$Locus]])
+}, height = 450, width = 600)
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+## Mutation frequencing with read counts threshold
+
+- we can also see what as the threshold on read counts per allele (when the threshold of 0.9 for total read counts is used)
+
+
+## 
+```{r cum_den, out.height = "110%", out.width = "120%" }
+# Now displyaing it in shiny
+ui <- fluidPage(
+  # define title of the panel
+  titlePanel("Allele cumulative density"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples),
+      selectInput( inputId = "Locus", label = "Choose locus", choices = gd$names)),
+    # define output 
+    mainPanel(
+      plotlyOutput("CumDensity"),
+      ))) 
+# define server logic options
+server <- function(input, output) {
+      # Getting functions to create mutation efficiency table and plot
+    InputC  <- reactive({ 
+        # selecting sample
+    vc_all <- vc_all_list[[input$Locus]]
+    col <- vc_all[,input$Sample]
+    col
+            })
+
+    output$CumDensity<- renderPlotly({
+  Plot.Cum.dens(InputC())
+})
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```

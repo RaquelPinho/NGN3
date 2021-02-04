@@ -1,0 +1,395 @@
+---
+title: "Mutation_frequeny_rate_min_freq"
+author: "Raquel Pinho"
+date: "8/20/2020"
+output: 
+ html_document:
+   css: temp1.css
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## NGN3 variants analysis
+
+The analysis of the variantes of off target loci from NGN3 guides in porcines.The guide used was CCCGCGCAGCGCAUCCAACG.
+
+### Libraries used  
+
+```{r libraries, echo = FALSE, include=FALSE}
+library("ggplot2")
+library("CrispRVariants")
+library("Rsamtools")
+library("gdata")
+library("rtracklayer")
+library("gridExtra")
+library("shiny")
+library("plotly")
+library("GenomicFeatures")
+library("reshape")
+library("wesanderson")
+library("dplyr")
+library("ggpubr")
+library("superheat")
+library("psych")
+library("cowplot")
+library("circlize")
+```
+
+```{r functions, echo = FALSE, include=FALSE}
+import::here(.from = "D:/Raquel/Desktop/Post_doc/Codes/annotation_visualization_lib.R",
+             plotAnnotation_Mod,
+             arrangePlots,
+             mut.efficiency,
+             filter.alleles,
+             filter.allAlleles,
+             plotConservation,
+             Mut.eff.threshold,
+             Plot.Cum.dens,
+             Mut.eff.all.threshold,
+             MatrixSamples,
+             MissingSamples,
+             SumReadsPerSample,
+             GetStatsReads,
+             PlotReadPerGroup,
+             plotConservationSample,
+             layout_ggplotly,
+             meltedAlleleInfo,
+             filter.Alleles.allSamples,
+             plotMin_Allsamples,
+             Convert2Freq,
+             frequencyFilterAllSamples,
+             getAlleleType,
+             getDTcirclize,
+             meltedAlleleInfoFreqFiltered,
+             VizCirclizeByGroupFreqfiltered,
+             getDTcirclizeByGroupFreqFiltering,
+             frequencyFilterPerSample,
+             VizCirclize,
+             Barplot.freq,
+             min_freq)
+```
+
+
+### Samples and metadata 
+
+Samples from blastocysts derivides from IVF (BL) or parthenogenesis (PT) were analyzed with targeted sequencing for the target region (NGN3) and 7 predicted off-target sites (OF) 
+
+```{r set_samples, include=F, echo=FALSE}
+# Setting up the working directory
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+
+# Read samples files, each .bam file are the reads for all (target/offtarget) sites for one sample.
+readfiles<-list.files("./Bam")
+
+# Loading reference, GRange objects, trancript database and metadatas
+## I saved the fasta files with the reference sequences and the GRange objects of the target / off target regions in a .RData file
+load("./Data/NGN3_cr_Robj.RData")
+## where gd is the GRange of the target regions,
+## amp_ranges is the GRanges of  the amplicon regions with seqlevels as the ncbi id in the transcript database
+## the references is a DNAStringSet, with the references sequences of the loci of target and off-target sites, 
+## locimetadata is a df with the information of the loci,
+## metadata is the metadata of the samples with the information of file paths and group information
+reads_vc_all_list <- readRDS("./Data/reads_vc_all_list_min_freq_filtered.RDS")
+#load(file = "./CrisprSets.RData")
+#list2env(All_sets, envir=.GlobalEnv)
+
+```
+
+## Frequency filtering
+
+Frequency filtering with the min-freq for removal of background in the upstream and downstream region of the target loci.
+## Frequency filtering
+```{r freq_filtered, out.height = "110%", out.width = "100%"}
+#define palette
+pal_mutations <- c('SNV' = "#F1BB7B", 'Insertion' = "#FD6467", 'Deletion' = "#5B1A18", 'Mixed' = "lavenderblush3", 'Reference' = "#b3e2cd", 'Other' = "lightseagreen")
+
+# Now displyaing it in shiny
+ui3 <- fluidPage(
+  # define title of the panel
+  titlePanel("Variant frequency"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput(inputId = "Locus", label = "Choose target / off-target (OF) region", choices = gd$names),
+      selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples)),
+    
+    # define output 
+    mainPanel(
+      tableOutput("table"),
+      plotOutput("lollipop")
+    )))
+# define server logic options
+server3 <- function(input, output) {
+  InputS <- reactive({
+    dt <- reads_vc_all_list[[input$Locus]][[input$Sample]]
+    names(dt) <- c("Variants", "Frequency_Before", "Read_Counts", "Frequency_After")
+    dt <- dt %>% mutate(Type = sapply(Variants, getAlleleType)) %>% mutate(Type = factor(Type, levels = c("SNV", "Insertion", "Deletion","Mixed", "Reference", "Other")))
+    dt
+  })
+  output$table <- renderTable({
+    n<-ifelse(nrow(InputS())<5,nrow(InputS()),5)
+    InputS()[order(InputS()$Frequency_After,decreasing = TRUE)[1:n],]
+  })
+  output$lollipop <-renderPlot({
+    p <- ggdotchart(InputS(), x = 'Variants', y = 'Frequency_After', col = "Type", group = "Type", sort = 'descending', add = 'segments', rotate = TRUE, add.params = list(color = "Type", size = 1.5), label = round(InputS()$Frequency_After, 1), font.label = list(color = "white", size = 9, vjust = 0.4), dot.size = 6)+ scale_color_manual(values = pal_mutations, drop = FALSE) 
+    p
+  }, height = 600, width = 500 )
+} 
+
+# Run the application 
+shinyApp(ui = ui3, server = server3)
+```
+## Mutation efficiency and Mutation rate 
+
+Mutation efficiency and mutation rate before and after filtering with the min-freq thershold got from the upstream and downstream regions of the target site.
+
+Mutation efficiency was calculating the ration between the sum of reads of mutated alleles and the total reads. (only the reads kept after filtering were considered for the after filtering analysis)
+
+Mutation rate was calculated calculating the ratio of the number of samples with at least 15% mutation efficiency by the total number of samples (controls excluded)
+
+Mutation rate
+##
+```{r mut_rate}
+# Calculating Mutation Efficiency
+mut_eff <- lapply(reads_vc_all_list, function(l) {
+             mut_eff <- sapply(seq_along(l), function(i){
+                  dt <- l[[i]]
+           names(dt) <- c("Variants", "Frequency_Before", "Read_Counts", "Frequency_After")
+                  dt <- dt %>% mutate(Type = sapply(Variants, getAlleleType)) %>% mutate(Type = factor(Type, levels = c("SNV", "Insertion", "Deletion","Mixed", "Reference", "Other")))
+                  no_mut <- grep("Reference|SNV", dt$Type)
+                  mut_eff<- ifelse(length(no_mut) == 0, 1, sum(dt$Read_Counts[-no_mut])/sum(dt$Read_Counts))
+                  names(mut_eff) <- names(l)[i]
+                  mut_eff
+             })
+})
+## Mutation rate at the target site for all groups and per groups 
+#In this case, we are removing control samples and putting them together
+#define palette
+palette <- wes_palette("GrandBudapest1",3)
+pal_groups <- c("Blastocysts" = "#E6A0C4", "Blastocysts_M" = "#C6CDF7", "Partenotes_M" = "#7294D4", "Control" = "#D8A499", "All" = "deeppink4")
+# Now displyaing it in shiny
+ui <- fluidPage(
+  # define title of the panel
+  titlePanel("Mutation Rate"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput(inputId = "Locus", label = "Choose target / off-target (OF) region", choices = gd$names)),
+    #define output 
+    mainPanel(
+      tableOutput("table"),
+      plotOutput("barplot"),
+      plotOutput("piechart")
+                  )))
+# define server logic options
+server <- function(input, output) {
+  #loading crisprset 
+  InputME <- reactive({
+      me <- mut_eff[[input$Locus]]
+      group <- metadata$Group[metadata$Samples %in% names(me)]
+      me <- data.frame(Samples = names(me), MutEff = me, Group = group) 
+      controls <- which(group == "Control")
+      All_groups_ME <- me[-controls,]
+      All_groups_ME <- length(which(me$MutEff > 0.15))/nrow(All_groups_ME)
+      All <- c("All", All_groups_ME)
+      me <- me %>% group_by(Group) %>% 
+      summarise(mut_rate = length(which(MutEff > 0.15))/n())
+      me <- me[match(me$Group, c("Blastocysts", "Blastocysts_M", "Partenotes_M", "Control")),]
+      me$Group <- as.character(me$Group)
+      me <- rbind(me, All) 
+      me$Group <-factor(me$Group, levels = c("Blastocysts", "Blastocysts_M", "Partenotes_M", "Control","All"))
+      me$mut_rate <-as.numeric(me$mut_rate)
+      me
+    })
+InputMO <- reactive({
+      me <- mut_eff[[input$Locus]]
+      # Non mosaics because have mutation efficiency lower than 25% 
+      non_mutated_me <- names(which(me < 0.15))
+      nc <- which(non_mutated_me %in% c("BLCL","PTMCL"))
+      non_mutated_me <- non_mutated_me[-nc]
+      # Now trying to find non mosaics that have mutation efficiency greater than 25% and only one allele or alleles that are only SNVs.
+      # Getting samples with 0 or 100% mutation efficiency, since what is in between is mosaic for sure. Also removing the controls since they are not going to be accounted since they were not injected/electroporated
+      non_mosaics <- names(me[which(me %in% c(0,1))]) 
+      #Now I can get the samples with more than two  alleles, that are not SNVs and Reference.
+      # if there are two alleles the frewqucny of both should be greater than 40% (heterozygous)
+      nm <- sapply(non_mosaics, function(n) {
+      nm <- ifelse(nrow(reads_vc_all_list[[input$Locus]][[n]]) <= 2 && all(reads_vc_all_list[[input$Locus]][[n]]$Frequency_a > .40)  | length(grep("SNV | variant", rownames(reads_vc_all_list[[input$Locus]][[n]]))) == nrow(reads_vc_all_list[[input$Locus]][[n]]),TRUE,FALSE)
+      nm })
+      non_mosaics <-non_mosaics[nm]
+      non_mosaics <- non_mosaics[which(!(non_mosaics %in% c("BLCL","PTMCL")))]
+      non_mosaics <- c(non_mosaics, "BLCL","PTMCL")
+      group <- metadata$Group[metadata$Samples %in% non_mosaics]
+      #getting the number of non mosaics samples
+      n_non_m <-  sapply(seq_along(levels(group)), function(i) {
+        non_m <- length(which(group == levels(group)[i])) 
+          })
+      # Do data.frame for piechart
+      dt <- metadata[,-2]
+      # removing samples considered not mutated and not controls
+      pattern <-paste(non_mutated_me,collapse = "|")
+      no_mut <- grep(pattern = pattern, dt$Samples)
+      dt <- dt[-(no_mut),]
+      dt$Mosaic <- ifelse(dt$Sample %in% non_mosaics, "No_mosaic", 'Mosaic')
+      dt$Group <- factor(dt$Group, levels = c("Blastocysts", "Blastocysts_M", "Partenotes_M", "Control"))
+      data <- dt %>% group_by(Group,Mosaic) %>% count() %>% ungroup() 
+      data_sum <- data %>% group_by(Group) %>% summarise(sum_em = sum(n))
+      data <- lapply(seq_along(levels(data$Group)), function(i) {
+                  if(length(which(data$Group == levels(data$Group)[i])) == 2) { 
+                   per <- data %>% filter(Group == levels(data$Group)[i]) %>% mutate(per =                     n/rep(data_sum$sum_em[data_sum$Group == levels(data$Group)[i]], 2))
+                    } else {
+                     per <- data %>% filter(Group == levels(data$Group)[i]) %>% mutate(per =                       n/n)
+                      }
+                })
+      data <-do.call(rbind, data)
+      data$label <- scales::percent(data$per)
+      data
+      })
+  inputT <- reactive({
+    me <- mut_eff[[input$Locus]]
+    datamo <- InputMO()[-grep("No",InputMO()$Mosaic),]
+    All_n <- sum(InputMO()$'n'[InputMO()$Group %in% datamo$Group])
+    All_mn <- sum(datamo$n)
+    All_per <- All_mn/All_n
+    All <- c("All", "Mosaic", All_mn, All_per,  scales::percent(All_per)) 
+    datamo$Group <- factor(datamo$Group , levels = c("Blastocysts",   "Blastocysts_M", "Partenotes_M", "Control","All"))
+    datamo <- rbind(datamo, All)
+    n_group <- InputMO() %>% group_by(Group) %>%  summarise(sum_em = sum(n))
+    n_group <- n_group$sum_em[n_group$Group %in% datamo$Group]
+    n_group <- c(n_group, sum(n_group))
+    datamo$mut_n <- n_group 
+    mut_rate <- scales:: percent(InputME()$mut_rate)
+    datamo <- lapply(seq_along(levels(datamo$Group)), function(i) {
+                     if(length(which(datamo$Group == levels(datamo$Group)[i])) == 0) { 
+                       info <- c(levels(datamo$Group)[i], NA, NA, NA,NA,0)
+                     } else {
+                       info <- datamo[datamo$Group == levels(datamo$Group)[i],]
+                     }
+                })
+    datamo <-do.call(rbind, datamo)
+    datamo$mut_rate <- mut_rate
+    datamo$`Mutation rate` <- ifelse(is.na(datamo$mut_n),"0",paste0(datamo$mut_rate,"   ","(",datamo$mut_n,")"))
+    datamo$`Mosaic rate` <- ifelse(is.na(datamo$Mosaic),NA, paste0(datamo$label," ","(",datamo$n,")"))
+     group <- metadata$Group[metadata$Samples %in% names(me)]
+     n_group_all <- sapply(seq_along(levels(metadata$Group)), function(i) {
+      x = length(which(group == levels(metadata$Group)[i]))
+      names(x) = levels(metadata$Group)[i]
+      x })
+      c_n <- length(which(names(me) %in% c("BLCL", "PTMCL")))
+      all_n <- sum(n_group_all) - c_n
+     datamo$'N' <- c(n_group_all[match(names(n_group_all), datamo$Group)],paste(all_n,"(controls removed)",collapse = " " ))
+     datamo <- datamo[,c(1,10,8,9)]
+     datamo
+      })
+        
+    output$table <- renderTable({
+      inputT()
+      
+    })
+    
+    output$barplot <- renderPlot({
+      p<-ggplot(InputME(), aes(x= Group, y  = mut_rate, fill = Group)) + 
+      geom_bar(stat =  "identity")+
+      scale_y_continuous(labels = scales::percent_format()) + geom_text(data =     InputME(), aes(x=     Group, y = mut_rate, label = paste0(round(mut_rate*100,     digits = 1),"%")),      position = position_stack(vjust = 0.7)) +     scale_fill_manual(values=pal_groups)+
+       theme_pubr()  + ylab("Mutation rate")+ xlab("Groups")
+     p}, height = 400, width = 500)
+    
+    output$piechart <- renderPlot({
+      data <- InputMO()
+      me <- mut_eff[[input$Locus]]
+      group <- metadata$Group[metadata$Samples %in% names(me)]
+      n_group_all <- sapply(seq_along(levels(metadata$Group)), function(i) {
+      x = length(which(group == levels(metadata$Group)[i]))
+      names(x) = levels(metadata$Group)[i]
+      x })
+      data2 <- lapply(seq_along(levels(data$Group)), function(i) {
+            if(length(which(data$Group == levels(data$Group)[i])) == 0) { 
+              info <- c(levels(data$Group)[i], 'No_mosaic', n_group_all[levels(data$Group)[i]], 1L,"100%")
+            } else {
+              info <- data[data$Group == levels(data$Group)[i],]
+            }
+          })
+      data <-do.call(rbind, data2)
+      data$per <-as.numeric(data$per)
+      p<-ggplot(data, aes(x="", y=per, fill =Mosaic))+
+          geom_bar(stat="identity", position = position_fill()) +  
+          geom_text(aes(label = label), position = position_fill(vjust = 0.5))+
+          theme_minimal()+
+          theme(axis.text.x= element_blank(),axis.text.y = element_blank()) +
+          ggtitle("Mosaic by Group") + xlab("") + ylab("Group") +# Adds titles
+          facet_grid(facets=. ~ Group) + # Side by side bar chart
+          coord_polar(theta="y") 
+     p}, height = 300, width = 600)
+    
+
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+## Mutation efficieny
+we can see the mutation efficiency and the alleles present in each sample
+
+```{r mut_efficiency}
+#define palette
+palette <- wes_palette("GrandBudapest1",3)
+# Now displyaing it in shiny
+ui <- fluidPage(
+  # define title of the panel
+  titlePanel("Mutation Efficiency"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples),
+      selectInput( inputId = "Locus", label = "Choose locus", choices = gd$names)),
+    # define output 
+    mainPanel(
+      plotOutput("barplot")
+            )))
+# define server logic options
+server3 <- function(input, output) {
+  InputS <- reactive({
+    dt <- reads_vc_all_list[[input$Locus]][[input$Sample]]
+    names(dt) <- c("Variants", "Frequency_Before", "Read_Counts", "Frequency_After")
+    dt <- dt %>% mutate(Type = sapply(Variants, getAlleleType)) %>% mutate(Type = factor(Type, levels = c("SNV", "Insertion", "Deletion","Mixed", "Reference", "Other")))
+    non_mut <- grep("SNV|no", dt$Variants)
+    Variants <- c(as.character(dt$Variants)[non_mut], "mutated")
+    if(length(non_mut) != 0){
+    freq <- c(dt$Frequency_After[non_mut], sum(dt$Frequency_After[-non_mut]))
+    Reads <- c(dt$Read_Counts[non_mut], sum(dt$Read_Counts[-non_mut]))
+    } else{
+      freq <- sum(dt$Frequency_After)
+      Reads <- c(sum(dt$Read_Counts))
+    }
+    Sample <- rep("mut_eff", length(Variants))
+    mut_eff <- data.frame(Variants,Frequency_After = freq, Read_Counts = Reads, Sample)
+    dt <- dt[,c(1,4,3)]
+    dt$Sample <- rep(input$Sample, nrow(dt))
+    list_dt <- list(dt, mut_eff)
+    dt <- do.call(rbind, list_dt)
+    not_mut <- grep("SNV|no", levels(dt$Variants))
+    if(length(not_mut) != 0){
+    level<- levels(dt$Variants)[not_mut]
+    level <-c(levels(dt$Variants)[-not_mut],level)
+    dt$Variants <- factor(dt$Variants, levels = level)
+    }
+    dt
+  })
+  
+  output$barplot <- renderPlot({
+  ggplot(InputS(), aes(x= Sample, y =Frequency_After*100, fill = Variants)) + 
+  geom_bar(position = "fill", stat =  "identity")+
+  scale_y_continuous(labels = scales::percent_format()) + geom_text(data = InputS(), aes(x=     Sample, y = Frequency_After, label = paste0(round(Frequency_After*100, digits = 1),"%")),      position = position_stack(vjust = 0.7)) + scale_x_discrete( labels= c(paste(input$Sample),"Mutation \n efficiency") ) + theme_pubr() + coord_flip() + labs(y ="Variant frequency", x = NULL)
+   }, height = 300, width = 800)
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server3)
+
+```
+

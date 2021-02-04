@@ -1,0 +1,339 @@
+---
+title: "NGN3 variant analysis"
+author: "Raquel Pinho"
+date: "4/1/2020"
+output:
+  html_document:
+        toc: true
+        toc_depth: 2
+        toc_float: 
+              collapsed: false
+        number_sections: true
+        fig.width: 11
+        fig.height: 9
+        fig.caption: true
+        dev: png
+        df_print: paged
+        code_folding: hide
+        self_contained: false
+        keep_md: true
+  word_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# NGN3 variants analysis
+
+The analysis of the variantes of off target loci from NGN3 guides in porcines.The guide used was CCCGCGCAGCGCAUCCAACG.
+
+## Load libraries 
+
+I will use mainly the CrispRVariants package, for plotting ggplot2 and for importing the data rtracklayer.
+
+```{r libraries}
+library("ggplot2")
+library("CrispRVariants")
+library("Rsamtools")
+library("gdata")
+library("rtracklayer")
+library("gridExtra")
+library("Biostrings")
+library("readr")
+library("GenomicRanges")
+library("GenomicFeatures")
+```
+
+
+```{r functions, echo = FALSE, include=FALSE}
+import::here(.from = "D:/Raquel/Desktop/Post_doc/Codes/annotation_visualization_lib.R",
+             plotAnnotation_Mod,
+             arrangePlots,
+             mut.efficiency,
+             Target_position,
+             frequencyFilterPerSample)
+```
+## Setting directory, samples and metadata
+
+```{r setup}
+# Setting up the working directory
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+
+# Read samples files, each .bam file are the reads for all (target/offtarget) sites for one sample.
+readfiles<-list.files("./Bam")
+
+# Creating metadata table for samples:
+Samples <- gsub(".sort.bam", "", readfiles)
+Group <- vector(mode = "character", length = length(readfiles))
+Files <- file.path("./Bam",readfiles)
+Group[grep("PTM",readfiles)] <- "Partenotes_M" 
+Group[grep("BL",readfiles)] <- "Blastocysts" 
+Group[grep("BLM",readfiles)] <- "Blastocysts_M" 
+Group[grep("CL",readfiles)] <- "Control"  
+# Group[grep("CL",readfiles)] <- paste0(Group[grep("CL",readfiles)], "_CL")  
+metadata <- data.frame (Samples, Files = Files, Group)
+
+# Gettiing samples and references
+## the .bed file has the ranges where the guide site is located in the target and off target loci. we will import the information in the file as GRange objects. 
+gd_test <-"guide_rg.bed"
+gd <- rtracklayer::import(gd_test)
+
+# Get the reference sequence for the ranges on the bed file in a DNAString format
+references <-readDNAStringSet(filepath = "./target_rg_cr.fasta",format = "fasta", use.names = TRUE)
+# Each line element of the DNAStringSet is a DNAString and can be used to create a single reference (i.e a reference for a single site)
+#references[1] <-reverseComplement(references[1])
+
+# Then we make sure that the ranges in the gd is matching the references strings
+if(!identical(width(references),width(gd))) {
+  start(gd) <- start(gd) - 1
+}
+```
+
+## Creating a metadata for the target sites
+
+ID      NGN3_off-target_sequences  Chrom RefSeq  start  end Primers_F  Primers_R Amplicon_size Off-target_score**   
+OF1     Unknown  chr6 NC_010448.4  77410237  77411622  Fw:GAGGAGGGAGGGCAGAGTTTA Re:TCAAGTGTGTCCATAGGAAGCAA 1386  0.5
+OF2     RAPGEF1  chr1 NC_010443.5  271542616 271543904 Fw:ACAAACGCCACTGACTCTCAT Re:ATTGCTTACCCTGACCTGGAAG  1289  0.4
+OF3     Intergenic chr4 NC_010446.5  78425535  78426983  Fw:TCGAGGGGGTTTCAGGGTAA  Re:CTCTGCCTGGTTTCTAGCTGT 1449  0.3
+OF4     KCNH6  chr12 NC_010454.4 15364119  15365574  Fw:ATTGGGGGAAGACTGGAACG  Re:TGTCGAGGGCCCAGATTAGT  1456  0.3
+OF5     SERTAD3  chr6  NC_010448.4 48710053  48712093  Fw:GACACCTGGCCTGCAAGTAG  Re:TGACGGGGAGGGTCTCAAAA  1448  0.2
+OF6     Intergenic chr15 NC_010457.5 15234614  15235936  Fw:GCCTCAGGGGATTTGTTTAGTGA Re:GGCGGGCCCATACATAATGA  1323  0.2
+OF7     Intergenic chr7  NC_010449.5 119482060 119483365 Fw:GGATCAGACCTTGCACAGCA  Re:ACTTGGCATGCTCGAACCTT  1306  0.2
+OF8     RTN4RL1  chr12 NC_010454.4 48106834  48109857  Fw:TCTCCCAGGAAGCTCTACGA  Re:TGTCGGTCACCATTGTCCTT  1334  0.2
+OF9     Intergenic chr4  NC_010446.5 122084388 122087411 Fw:CGCCTGCATTTGCAAGACAT  Re:AGTCATCTGTGCGAAGTGCT 1490  0.2
+OF10    TMEM129  chr8  NC_010450.4 819925  822948  Fw:GCCTTGGGCAAATCTGAGT Re:CTCCTTTGAGCCGCCTTCTA  1333 0.2
+NGN3    NGN3_R chr14  NC_010456.5  c72606355 72604909  Fw:GAAATCCGCAGGGTCTCACA  Re:GGAGCAAACGCTGACACAAA  1400 Target
+
+```{r metadata_loci}
+# loading metadata 
+locimetadata <- read_table2("D:/Raquel/Desktop/Post_doc/NGN3/locimetadata.txt")
+# Checking for complementary regions
+check_levels<-paste0(locimetadata$ID,":",locimetadata$start,"-",locimetadata$end) 
+cr <- grep(":c", check_levels)
+locimetadata_cr <-locimetadata[cr,]
+check_levels[cr] <- paste0(locimetadata_cr$ID,":",locimetadata_cr$end,"-",gsub("c","",locimetadata_cr$start))
+locimetadata$seqlvl <- check_levels
+locimetadata[,11] <- c("PAMCCTCTTTGGATGCCCTGCGCCAG","PAMCCACGTTGGATCCACTGTGCCGG", "CCGGCTCAGCGCATCTAACGGGGPAM", "PAMCCACGGTGGATGCGCGGCGCCTG","CCCGACCAGCCCATCCAACCAGGPAM", "PAMCCCCTTTGGATGGGCTGGGTGGG", "CCCACCCAGTGCATCCAGCGTGGPAM","", "","",
+"PAMCCGCGTTGGATGCGCTGCGCGGG")
+names(locimetadata)[11] <- "Seq_loci"
+# metadata for gene ranges
+gd$names <-gsub(":.*","",as.character(seqnames(gd)))
+gd$feature <- c( "gene", "Unknown", "gene","Intergenic","gene","gene", "Intergenic","Intergenic")
+gd$genes_names <- c("NGN3","Unknown", "RAPGEF1", "Intergenic","KCNH6", "SERTAD3","Intergenic","Intergenic")
+gd$chrm <- paste0(rep("chr",8), c(14, 6, 1, 4, 12, 6, 15, 7))
+gd$RefSeq <- unname(sapply(seqlevels(gd), FUN = function(x) locimetadata$RefSeq[locimetadata$seqlvl == x]))
+strand(gd) <- c("-",rep ("+", length(gd)-1))
+```
+
+
+## Analysis of individual sample/loci combination
+
+To create plots and do the calculation of mutation frequency, we need to create a crisprSet object.
+
+
+```{r variant_analysis}
+# choose the target and orientation based on the index of gd and strand of the target region 
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+tgt <- gd[1] # for NGN3
+orientation <-ifelse(strand(tgt) == "-", "opposite", "target")
+crispr_set <- readsToTarget(reads ="./Bam/BL01.sort.bam", names = metadata$Samples[1], target = tgt, reference = references[1], target.loc = 31, orientation= orientation)
+# we can extract the variants counts as matrix.
+vc <-variantCounts(crispr_set)
+# the first variants in the table are single (or multiple) nucleotide variants without insertions or deletions.
+#I will remove those lines, because the I will have the indels in order of frequency.
+SNV_end <- (max(grep("SNV", row.names(vc))) + 1)
+vc_noSNV <- vc[SNV_end:(SNV_end+20),]
+vc_noSNV <- rbind(vc[1,],vc_noSNV)
+```
+and then we can get the summary of occurring mutations.
+
+```{r summary_mutation}
+crispr_set
+```
+
+## Variants plots 
+
+We can then plot the varients according the theit mutations and frequencies.
+
+
+```{r plotVariants}
+p <- plotVariants(crispr_set, gene.text.size = 8,
+row.ht.ratio = c(1,8), col.wdth.ratio = c(4,2),
+plotAlignments.args = list(line.weight = 1, ins.size = 2,
+legend.symbol.size = 4),
+plotFreqHeatmap.args = list(plot.text.size = 4, x.size = 8, group = metadata$Group[1],
+legend.text.size = 8,
+legend.key.height = grid::unit(0.5, "lines")))
+plot(p)
+
+```
+
+## Analyzis of all samples in one loci
+
+```{r taget_all_samples}
+# choose the target and orientation based on the index of gd and strand of the target region 
+tgt <- gd[1] # for NGN3
+orientation <-ifelse(strand(tgt) == "-", "opposite", "target")
+# we can extract the variants counts as matrix.
+crispr_set_all <- readsToTarget(reads = file.path(metadata$Files), names = metadata$Samples, reference = references[1], target =tgt, target.loc = 31, orientation=orientation, group = metadata$Group)
+crispr_set_all
+# we can extract the variants counts as matrix.
+vc_all <-variantCounts(crispr_set_all)
+
+```
+## Creating crisprsets for all targets
+
+```{r all_targets}
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+toc_loc <- Target_position(gd,locimetadata, references)
+All_sets <- lapply(c(1:length(gd)), FUN =  function(x){
+  tgt <-gd[x]
+  orientation <-ifelse(BiocGenerics::strand(tgt) == "-", "opposite", "target")
+  ref <- references[grep(seqnames(tgt),names(references))]
+  crispr_set_all <- readsToTarget(reads = file.path(metadata$Files), names = metadata$Samples, reference = ref, target =tgt, target.loc = toc_loc[[x]]$target_loc, orientation="target", group = metadata$Group)
+  return(crispr_set_all)
+})
+names_sets <- paste0("crisprset_", gd$names)
+names(All_sets) <- names_sets
+```
+
+## Creating crisprsets for all targets allowing for long deletions
+
+In this I will use the option minoverlap = 30 (the default is the whole target region) it says that the alignments should cover 30 bp of the target region - which is 40-50 bp in this case. And the option chimera.to.target = 300, indicating that it will accept deletion of 350 bp if it starts at the target site.
+
+```{r all_targets}
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+toc_loc <- Target_position(gd,locimetadata, references)
+All_sets_long_del <- lapply(c(1:length(gd)), FUN =  function(x){
+  tgt <-gd[x]
+  orientation <-ifelse(BiocGenerics::strand(tgt) == "-", "opposite", "target")
+  ref <- references[grep(seqnames(tgt),names(references))]
+  crispr_set_all <- readsToTarget(reads = file.path(metadata$Files), names = metadata$Samples, reference = ref, target =tgt, target.loc = toc_loc[[x]]$target_loc, orientation="target", group = metadata$Group, minoverlap = 30,  chimera.to.target = 300)
+  return(crispr_set_all)
+})
+names_sets <- paste0("crisprset_", gd$names)
+names(All_sets_long_del) <- names_sets
+vc_all_list <- lapply(All_sets,variantCounts)
+names(vc_all_list) <- gsub("crisprset_", "", names(vc_all_list))
+```
+
+
+## Plots alignments of most frequent alleles for each crispr_set in All_sets
+
+```{r plot_alg}
+target_loc <- toc_loc
+alg_plots <- lapply(seq_along(All_sets), FUN = function(i){
+  p <- plotAlignments(All_sets[[i]],target.loc = target_loc[[i]]$target_loc, pam.start =  target_loc[[i]]$PAM, guide.loc = target_loc[[i]]$target_region)
+  return(p)
+  })
+
+
+```
+
+## Mutation efficiency 
+
+I will first calculate mutation efficiency (mutated reads (with indels) / total number of reads) per sample with and without removing the reads presented in the control reads, also I will account the error by  removing the reads that account for the lower 10% of total reads. For this I  will use the mut.efficiency function. I will plot the  inverse cumulative probability to visualize the alleles removed. 
+
+```{r mut_eff}
+mut_eff <- mut.efficiency(crispr_set_all)
+read_10p <- apply(vc_all,2,FUN = function(x) {cumsum(x,rev)})
+plot(ecdf(vc_all[,1]))
+plot(vc_all[,1],1-ECDF(vc_all[,1]))
+abline( v= read_10p)
+```
+
+
+I will now get the most frequent alleles (variants), i.e the variants that have more than 10% frequency when summing all samples.
+
+
+```{r freq_0.1}
+#Getting the alleles / variants with total frequency (considering all samples) greater than 0.1 (10%)
+vcc <- sweep(vc_all, 2,total_reads , '/')
+freq_0.1 <- apply(vcc, 1, sum)
+freq_0.1 <- freq_0.1 > 0.1
+vcc_0.1 <- vcc[freq_0.1,]
+vcc_0.1 <- signif(vcc_0.1, digits = 2)
+row.names(vcc_0.1)[1] <- "No variant"
+colnames(vcc_0.1) <- gsub(".sort.bam", "", colnames(vcc_0.1))
+
+```
+
+## Subseting database in command line 
+
+```{r metadata_loci}
+# loading metadata 
+locimetadata <- read_table2("D:/Raquel/Desktop/Post_doc/NGN3/locimetadata.txt")
+# Using the locimetadata to do the txdb
+# getting the refseq id and adding the "-e" option for the grep function (so I can look for more than a pattern at a time)
+pattern<-unique(paste(rep("-e", nrow(locimetadata)),locimetadata$RefSeq))
+pattern<-paste(pattern, collapse = " ")
+command<-paste("zcat *.gz | grep",pattern,"> loci.gff")
+# now we can subset the gff files to get the nucleotide regions (chromosomes - but in ncbi notation) where the off=target and on-target are located
+system(command)
+```
+
+## importing database and formatting names to match the fasta/bed files
+
+```{r imp_db}
+txlocigff <-makeTxDbFromGFF("loci.gff" ,format = "gff")
+# Checking the names in txdb and in the gene ranges
+seqlevels(txlocigff)
+seqlevels(gd)
+# check if thhe names are the same
+seqlevels(gd) %in% check_levels
+## making the ranges for the amplicon using the ncbi id 
+ranges <- data.frame(locimetadata[,c(4:6,1)])
+ranges<-ranges[ranges$ID %in% gd$names,]
+if(!is.null(grep("c", ranges$start))) {
+  cr <- grep("c", ranges$start)
+  end_cr <- gsub("c","", ranges$start[cr])
+  ranges$start[cr] <- ranges$end[cr]
+  ranges$end[cr] <- end_cr
+  ranges[,2:3] <- apply(ranges[,2:3],2,as.numeric)
+}
+names(ranges)[1] <-"seqnames"
+amp_ranges <- makeGRangesFromDataFrame(ranges, keep.extra.columns =TRUE)
+```
+
+## Frequency filtering
+Frequency filtering with the up and downstream regions of the target locus. min_frequency that removes the background.
+
+```{r freq_filtered, out.height = "110%", out.width = "100%"}
+load("./vc_all_list_up_down.RData")
+min_freq <- sapply(metadata$Samples, function(s) {min_freq(vc_all_list_up_down, Sample = s)})
+names(min_freq) <- metadata$Samples
+filtered_vc_all_list <- lapply(vc_all_list, function(m) {
+                   x <- sapply(colnames(m), function(c) frequencyFilterPerSample(m, freq.threshold = min_freq[c])[c] )
+                   names(x)<- colnames(m)
+                   x})
+reads_vc_all_list <- sapply(seq_along(filtered_vc_all_list), function(j) {
+                   l <- filtered_vc_all_list[[j]] 
+                   vc_all <- vc_all_list[names(filtered_vc_all_list)[j]][[1]]
+                   x <- lapply(seq_along(l), function(i) {
+                   sample <- names(filtered_vc_all_list[[j]])[i] 
+                   vc_all <- vc_all[,sample]
+                   vc_all <- vc_all[names(l[[i]])]
+                   Freq_a <- vc_all/sum(vc_all)
+                   dt <- data.frame(Variants = names(l[[i]]), Frequency_b = l[[i]], Reads = vc_all, Frequency_a = Freq_a )
+                   })
+                   names(x) <- names(filtered_vc_all_list[[j]])
+                   x})
+names(reads_vc_all_list) <- names(filtered_vc_all_list)
+
+```
+
+
+## Saving important data in a RData format
+
+```{r saving_data}
+saveRDS(toc_loc, file = "./target_loc.RDS")
+saveRDS(reads_vc_all_list, file = "./reads_vc_all_list_min_freq_filtered.RDS")
+save(references, metadata, locimetadata, gd, amp_ranges,vc_all_list, file = "./NGN3_cr_Robj.RData")
+save(All_sets, file = "./CrisprSets.RData")
+save(All_sets_long_del, file = "./CrisprSets_log_del.RData")
+```
+

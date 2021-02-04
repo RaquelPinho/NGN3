@@ -1,0 +1,373 @@
+---
+title: "Allele analysis comparing frequency filtering and allele conservation frequency"
+author: "Raquel Pinho"
+date: "5/26/2020"
+output: 
+ html_document:
+   css: temp1.css
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## NGN3 variants analysis
+
+The analysis of the variantes of off target loci from NGN3 guides in porcines.The guide used was CCCGCGCAGCGCAUCCAACG.
+
+### Libraries used  
+
+I will use mainly the CrispRVariants package, for plotting ggplot2 and for importing the data rtracklayer.
+
+```{r libraries, echo = FALSE, include=FALSE}
+library("ggplot2")
+library("CrispRVariants")
+library("Rsamtools")
+library("gdata")
+library("rtracklayer")
+library("gridExtra")
+library("shiny")
+library("plotly")
+library("GenomicFeatures")
+library("reshape")
+library("wesanderson")
+library("dplyr")
+library("ggpubr")
+library("superheat")
+library("psych")
+library("cowplot")
+```
+
+```{r functions, echo = FALSE, include=FALSE}
+import::here(.from = "D:/Raquel/Desktop/Post_doc/Codes/annotation_visualization_lib.R",
+             plotAnnotation_Mod,
+             arrangePlots,
+             mut.efficiency,
+             filter.alleles,
+             filter.allAlleles,
+             plotConservation,
+             Mut.eff.threshold,
+             Plot.Cum.dens,
+             Mut.eff.all.threshold,
+             MatrixSamples,
+             MissingSamples,
+             SumReadsPerSample,
+             GetStatsReads,
+             PlotReadPerGroup,
+             plotConservationSample,
+             layout_ggplotly,
+             meltedAlleleInfo,
+             filter.Alleles.allSamples,
+             plotMin_Allsamples,
+             Convert2Freq,
+             frequencyFilterAllSamples,
+             getAlleleType,
+             getDTcirclize,
+             frequencyFilterPerSample,
+             VizCirclize)
+```
+
+
+### Samples and metadata 
+
+Samples from blastocysts derivides from IVF (BL) or parthenogenesis (PT) were analyzed with targeted sequencing for the target region (NGN3) and 7 predicted off-target sites (OF) 
+
+
+```{r set_samples, include=F, echo=FALSE}
+# Setting up the working directory
+setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+
+# Read samples files, each .bam file are the reads for all (target/offtarget) sites for one sample.
+readfiles<-list.files("./Bam")
+
+# Loading reference, GRange objects, trancript database and metadatas
+## I saved the fasta files with the reference sequences and the GRange objects of the target / off target regions in a .RData file
+load("./NGN3_cr_Robj.RData")
+## where gd is the GRange of the target regions,
+## amp_ranges is the GRanges of  the amplicon regions with seqlevels as the ncbi id in the transcript database
+## the references is a DNAStringSet, with the references sequences of the loci of target and off-target sites, 
+## locimetadata is a df with the information of the loci,
+## metadata is the metadata of the samples with the information of file paths and group information
+```
+
+## Variants per locus with threshold
+
+- The number of variants/alleles also varied greatly depending on the locus, probably because the the total number of reads as also much smaller. In the next slide we investigate the number of alleles per locus with and without filtering the reads. The filter was done removing 10% of the reads responsible for the lowest frequency alleles. 
+
+## Variants per locus with threshold
+```{r number_of_alleles}
+# doing data frame with general allele conservation, that is the number of unique alleles kept considering all samples
+## number of alleles with no filter
+n_variants_per_locus <- sapply(vc_all_list,FUN= function(x) {dim(x)[1]})
+## number of alleles after filtering with threshold 0.9
+n_variants_per_locus_thr <- sapply(seq_along(vc_all_list), FUN= function(i) {
+  length(
+    unique(
+      unlist(
+        apply(vc_all_list[[i]],2, FUN = function(x) {filter.alleles(x,0.9)})
+        )))
+})
+
+n_variantes_Freq_thr_6 <- sapply(lapply(vc_all_list,frequencyFilterAllSamples), length)
+n_variantes_Freq_thr_12 <- sapply(lapply(vc_all_list,frequencyFilterAllSamples,freq.threshold = 0.125 ), length)
+# Creating data frame with number of alleles per locus
+Table <- data.frame(Locus = names(vc_all_list), All_No_filter = n_variants_per_locus, All_Filtered = n_variants_per_locus_thr, Freq_filter_6 = n_variantes_Freq_thr_6, Freq_filter_12 = n_variantes_Freq_thr_12 )
+## Displaying on shiny
+# Now displyaing it in shiny
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+       h4("Allele conservation"),
+      tableOutput("table"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+ output$table <- renderTable({
+  Table
+ },height = 800, width = 800 )
+}
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+## Variant frequency per sample after filtering 
+
+Here I consider only the alleles kept after the filtering by remove alleles with frequency lower than 6.25% and compare with filtering with threshold of data conservation 0.9.
+
+## Frequency filtering
+```{r freq_filtered, out.height = "110%", out.width = "100%"}
+#define palette
+pal_mutations <- c('SNV' = "#F1BB7B", 'Insertion' = "#FD6467", 'Deletion' = "#5B1A18", 'Mixed' = "lavenderblush3", 'Reference' = "#b3e2cd", 'Other' = "lightseagreen")
+
+# Now displyaing it in shiny
+ui3 <- fluidPage(
+  # define title of the panel
+  titlePanel("Variant frequency"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput(inputId = "Locus", label = "Choose target / off-target (OF) region", choices = gd$names),
+      selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples)),
+    
+    # define output 
+    mainPanel(
+      tableOutput("table"),
+      plotOutput("lollipop")
+    )))
+# define server logic options
+server3 <- function(input, output) {
+  InputS <- reactive({
+    vc_all <- vc_all_list[[input$Locus]]
+    vc_filtered_list <- frequencyFilterPerSample(vc_all)
+    Sample_info <- vc_filtered_list[[input$Sample]]
+    Counts <-vc_all[names(Sample_info),input$Sample]
+    Freq_after_filter <- Counts/sum(Counts)
+    dt <- data.frame(Alleles = names(Sample_info), Counts = Counts, Frequency_filter = Freq_after_filter, Frequency = Sample_info)
+    dt <- dt %>% mutate(Type = sapply(Alleles, getAlleleType)) %>% mutate(Type = factor(Type, levels = c("SNV", "Insertion", "Deletion","Mixed", "Reference", "Other")))
+    dt
+  })
+  output$table <- renderTable({
+    n<-ifelse(nrow(InputS())<5,nrow(InputS()),5)
+    InputS()[order(InputS()$Frequency_filter,decreasing = TRUE)[1:n],]
+  })
+  output$lollipop <-renderPlot({
+    p <- ggdotchart(InputS(), x = 'Alleles', y = 'Frequency_filter', col = "Type", group = "Type", sort = 'descending', add = 'segments', rotate = TRUE, add.params = list(color = "Type", size = 1.5), label = round(InputS()$Frequency_filter, 1), font.label = list(color = "white", size = 9, vjust = 0.4), dot.size = 6)+ scale_color_manual(values = pal_mutations, drop = FALSE) 
+    p
+  }, height = 600, width = 500 )
+} 
+
+# Run the application 
+shinyApp(ui = ui3, server = server3)
+```
+
+## Thrshold filtering
+```{r thr_filtered, out.height = "110%", out.width = "100%"}
+#define palette
+pal_mutations <- c('SNV' = "#F1BB7B", 'Insertion' = "#FD6467", 'Deletion' = "#5B1A18", 'Mixed' = "lavenderblush3", 'Reference' = "#b3e2cd", 'Other' = "lightseagreen")
+  
+# Now displyaing it in shiny
+ui3 <- fluidPage(
+    # define title of the panel
+    titlePanel("Variant frequency"),
+    # define input
+    sidebarLayout( 
+      sidebarPanel( 
+            selectInput(inputId = "Locus", label = "Choose target / off-target (OF) region", choices = gd$names),
+            selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples)),
+    
+    # define output 
+    mainPanel(
+      tableOutput("table"),
+        plotOutput("lollipop")
+         )))
+# define server logic options
+server3 <- function(input, output) {
+      InputS <- reactive({
+      vc_all <- vc_all_list[[input$Locus]]
+      vc_filtered_list <- filter.Alleles.allSamples(vc_all)
+      Sample_info <- vc_filtered_list[[input$Sample]]
+      Counts <-vc_all[names(Sample_info),input$Sample]
+      Freq_after_filter <- Counts/sum(Counts)
+      dt <- data.frame(Alleles = names(Sample_info), Counts = Sample_info, Frequency_filter = Freq_after_filter,  Frequency = Sample_info/sum(Sample_info))
+      dt <- dt %>% mutate(Type = sapply(Alleles, getAlleleType)) %>% mutate(Type = factor(Type, levels = c("SNV", "Insertion", "Deletion","Mixed", "Reference", "Other")))
+      dt
+    })
+      
+      output$table <- renderTable({
+        n<-ifelse(nrow(InputS())<5,nrow(InputS()),5)
+        InputS()[order(InputS()$Frequency,decreasing = TRUE)[1:n],]
+      })
+       output$lollipop <-renderPlot({
+     p <- ggdotchart(InputS(), x = 'Alleles', y = 'Frequency', col = "Type", group = "Type", sort = 'descending', add = 'segments', rotate = TRUE, add.params = list(color = "Type", size = 1.5), label = round(InputS()$Frequency, 1), font.label = list(color = "white", size = 9, vjust = 0.4), dot.size = 6)+ scale_color_manual(values = pal_mutations, drop = FALSE) 
+     p
+     }, height = 780, width = 700 )
+} 
+    
+# Run the application 
+shinyApp(ui = ui3, server = server3)
+```
+
+## Comparing frequencing filtering and threshold
+```{r var_freq_filtered, out.height = "110%", out.width = "100%"}
+#define palette
+pal_mutations <- c('SNV' = "#F1BB7B", 'Insertion' = "#FD6467", 'Deletion' = "#5B1A18", 'Mixed' = "lavenderblush3", 'Reference' = "#b3e2cd", 'Other' = "lightseagreen", 'Frequency' = "darkslategray4",'Threshold' = "Salmon3")
+
+# Now displyaing it in shiny
+ui3 <- fluidPage(
+  # define title of the panel
+  titlePanel("Variant frequency"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput(inputId = "Locus", label = "Choose target / off-target (OF) region", choices = gd$names),
+      selectInput( inputId = "Sample", label = "Choose sample", choices = metadata$Samples)),
+    
+    # define output 
+    mainPanel(
+      tableOutput("table"),
+      plotOutput("lollipop")
+    )))
+# define server logic options
+server3 <- function(input, output) {
+  InputT <- reactive({
+    vc_all <- vc_all_list[[input$Locus]]
+    vc_filtered_list <- filter.Alleles.allSamples(vc_all)
+    Sample_info <- vc_filtered_list[[input$Sample]]
+    Counts <-vc_all[names(Sample_info),input$Sample]
+    Freq_after_filter <- Counts/sum(Counts)
+    dt <- data.frame(Alleles = names(Sample_info), Counts = Sample_info, Frequency_filter_T = Freq_after_filter,  Frequency = Counts/sum(vc_all[,input$Sample]))
+    dt <- dt %>% mutate(Type = sapply(Alleles, getAlleleType)) %>% mutate(Type = factor(Type, levels = c("SNV", "Insertion", "Deletion","Mixed", "Reference", "Other")))
+    dt
+  })
+  InputF <- reactive({
+    vc_all <- vc_all_list[[input$Locus]]
+    vc_filtered_list <- frequencyFilterPerSample(vc_all)
+    Sample_info <- vc_filtered_list[[input$Sample]]
+    Counts <-vc_all[names(Sample_info),input$Sample]
+    Freq_after_filter <- Counts/sum(Counts)
+    dt <- data.frame(Alleles = names(Sample_info), Counts = Counts, Frequency_filter_F = Freq_after_filter, Frequency =   Sample_info)  
+    dt <- dt %>% mutate(Type = sapply(Alleles, getAlleleType)) %>% mutate(Type = factor(Type, levels = c("SNV", "Insertion", "Deletion","Mixed", "Reference", "Other")))
+    dt
+  })
+  
+  InputTable <- reactive({
+    InputT <- InputT()[order(InputT()$Frequency, decreasing = T),]
+    InputF <- InputF()[order(InputF()$Frequency, decreasing = T),]
+   if(nrow(InputT) > nrow(InputF)){
+      nT<- which(!(rownames(InputT) %in% rownames(InputF)))
+      dt <- InputT
+      Frequency_filter_F <-vector(mode="numeric", length=nrow(InputT)) 
+      Frequency_filter_F <-c(InputF$Frequency_filter_F,rep(0,length(nT)))
+      names(Frequency_filter_F)<-dt$Alleles
+      dt$Frequency_filter_F <-Frequency_filter_F
+    }
+    if(nrow(InputF) > nrow(InputT)){
+      nT<- which(!(rownames(InputF) %in% rownames(InputT)))
+      dt <- InputF
+      Frequency_filter_T <-vector(mode="numeric", length=nrow(InputF)) 
+      Frequency_filter_T <-c(InputT$Frequency_filter_T,rep(0,length(nT)))
+      names(Frequency_filter_T)<-dt$Alleles
+      dt$Frequency_filter_T <-Frequency_filter_T
+    }
+    if(nrow(InputT) == nrow(InputF)){
+      dt <- InputT
+      Frequency_filter_F <-vector(mode="numeric", length=nrow(InputT)) 
+      Frequency_filter_F <-InputF$Frequency_filter_F
+      names(Frequency_filter_F)<-dt$Alleles
+      dt$Frequency_filter_F <-Frequency_filter_F
+    }
+    dt
+  })
+  
+  InputPlot <-reactive({
+    dt <- data.frame(Alleles = rep(InputTable()$Alleles,2),Frequency_filter = c(InputTable()$Frequency_filter_F,InputTable()$Frequency_filter_T), Filtering = c(rep("Frequency", nrow(InputTable())),rep("Threshold", nrow(InputTable()))), Type = rep(InputTable()$Type,2)) 
+  })
+
+  output$table <- renderTable({
+    InputTable()[1:5,]
+  })
+  output$lollipop <-renderPlot({
+    p<- ggdotchart(InputPlot(), x = 'Alleles', y = 'Frequency_filter', col = "Filtering", add = 'segments', rotate = TRUE, add.params = list(color = "Type", size = 1), dot.size = 4)+ scale_color_manual(values = pal_mutations, drop = FALSE)+ theme(legend.position = "none")
+    
+    for_first_legend <-
+      InputPlot() %>%
+      ggplot(aes(Frequency_filter, Alleles, col=Filtering)) + geom_point(size =4) + 
+      scale_color_manual(values = pal_mutations
+                         , name = "Filter")+ theme_pubr()
+    for_second_legend <-
+      InputPlot() %>%
+      ggplot(aes(Frequency_filter, Alleles, col=Type)) + geom_line(size = 2) + 
+      scale_color_manual(values = pal_mutations
+                         , name = "Mutation", drop = F)+ theme_pubr()
+    plotC<-plot_grid(p,plot_grid(get_legend(for_first_legend),get_legend(for_second_legend), nrow =1),nrow = 2,rel_heights = c(8,2))
+    plotC
+  }, height = 780, width = 700 )
+} 
+
+# Run the application 
+shinyApp(ui = ui3, server = server3)
+```
+## Visualization of variant frequency in chord diagram
+
+Here I am considering frequency greater than 0.0001 for off target samples since the number of alleles for the target locus is too big to plot in chord plot with all samples present. The samples were filtered with conservation data threshold 0.9 
+
+```{r var_freq_chord, out.height = "110%", out.width = "100%"}
+#define palette
+pal_mutations <- c('SNV' = "#F1BB7B", 'Insertion' = "#FD6467", 'Deletion' = "#5B1A18", 'Mixed' = "lavenderblush3", 'Reference' = "#b3e2cd", 'Other' = "lightseagreen")
+  
+# Now displyaing it in shiny
+ui3 <- fluidPage(
+    # define title of the panel
+    titlePanel("Variant frequency"),
+    # define input
+    sidebarLayout( 
+      sidebarPanel( 
+        selectInput(inputId = "Locus", label = "Choose off-target (OF) region", choices = gd$names[-1]),
+        sliderInput(inputId = "freq", label = "Frequency threshold", min = 0.001, max = 1,step = 0.001, value = 0.001, round = F),
+        radioButtons("no_variant", label = "Show no variants?",choices = c("yes","no"), selected = "no")),
+    
+    # define output 
+    mainPanel(
+        plotOutput("chord")
+         )))
+# define server logic options
+server3 <- function(input, output) {
+      InputS <- reactive({
+      vc_all <- vc_all_list[[input$Locus]]
+      })
+      InputN <- reactive({
+        nov  <- ifelse(input$no_variant == "yes", TRUE, FALSE )
+      })
+      output$chord <-renderPlot({
+     p <- VizCirclize(readMatrix = InputS(), metadata$Group, freq.threshold = input$freq, show_no_variants = InputN())
+     p
+     }, height = 800, width = 800 )
+} 
+    
+# Run the application 
+shinyApp(ui = ui3, server = server3)
+```

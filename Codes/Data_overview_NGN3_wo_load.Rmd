@@ -1,0 +1,178 @@
+---
+title: "Data overview NGN3"
+author: "Raquel Pinho"
+date: "5/26/2020"
+output: 
+ html_document:
+   css: temp.css
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## NGN3 variants analysis
+
+The analysis of the variantes of off target loci from NGN3 guides in porcines.The guide used was CCCGCGCAGCGCAUCCAACG.
+
+### Libraries used  
+
+I will use mainly the CrispRVariants package, for plotting ggplot2 and for importing the data rtracklayer.
+
+```{r libraries, echo = FALSE, include=FALSE}
+library("ggplot2")
+library("CrispRVariants")
+library("Rsamtools")
+library("gdata")
+library("rtracklayer")
+library("gridExtra")
+library("shiny")
+library("plotly")
+library("GenomicFeatures")
+library("reshape")
+library("wesanderson")
+library("dplyr")
+library("ggpubr")
+library("superheat")
+library("psych")
+```
+
+```{r functions, echo = FALSE, include=FALSE}
+import::here(.from = "D:/Raquel/Desktop/Post_doc/Codes/annotation_visualization_lib.R",
+             plotAnnotation_Mod,
+             arrangePlots,
+             mut.efficiency,
+             filter.alleles,
+             filter.allAlleles,
+             plotConservation,
+             Mut.eff.threshold,
+             Plot.Cum.dens,
+             Mut.eff.all.threshold,
+             MatrixSamples,
+             MissingSamples,
+             SumReadsPerSample,
+             GetStatsReads,
+             PlotReadPerGroup)
+```
+
+
+
+## Loci information 
+```{r locimetadata, out.height = "110%", out.width = "110%"}
+ui <- fluidPage(
+  # define title of the panel
+  titlePanel("Loci metadata"),
+  # define input
+  sidebarLayout( 
+    sidebarPanel( 
+      selectInput( inputId = "Loci", label = "Choose target / off-target (OF) region", choices = locimetadata$ID)),
+    # define output 
+    mainPanel(
+      DT::dataTableOutput("table"),
+      )))
+# define server logic options
+server <- function(input, output) {
+  tableInput <-  reactive({
+    switch(input$`Loci metadata`, locimetadata$ID)
+  })
+  itable <-reactive({
+    table <- locimetadata[locimetadata$ID == input$Loci, -11]
+    table <- t(as.matrix(table))
+    colnames(table) <- "Loci"
+    table
+  })
+
+  output$table <-DT::renderDataTable(
+  itable(), extension = "Buttons", options = list(dom = "Bfrtip", buttons = list("pdf", "csv",          "excel","print"), pageLength = 11)
+)
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+```
+
+## Missing Samples 
+
+For some loci samples were missing, so here I plot and create a table with all the Loci and the heatplot of the data to show which samples are missing. Reminding that samples PTM1104 and BLM571 didn't show up on sequencing.
+
+## Missing samples
+```{r sample_check, out.height = "110%", out.width = "110%"}
+# Now displyaing it in shiny
+ui <- fluidPage(
+  fluidRow(
+    column(6, offset= 0, 
+      plotOutput("plotSamples")),
+    column(6, offset = 0, h4("Missing samples"),
+      tableOutput("tableSamples"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+  output$plotSamples<- renderPlot({
+    par(mar = c(2,1,0.5,2))
+    MatrixSamples(vc_all_list)
+}, height= 400, width = 900)
+  
+ output$tableSamples <- renderTable({
+  MissingSamples(vc_all_list)
+ }, height= 400, width = 300)
+}
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+## Read counts
+
+- In the next slide I  will show the to total number of reads comming from the sequencing and the stat summary in general and by locus.
+
+## Read counts
+```{r read_counts_stats, out.height = "110%", out.width = "110%"}
+## Missing samples
+# Now displyaing it in shiny
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+       h4("Read counts per locus"),
+      tableOutput("tableReads"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+ output$tableReads <- renderTable({
+  table <- GetStatsReads(vc_all_list)
+  table
+ }, rownames = T)
+}
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+## Read counts per group
+
+- The number of reads was considerably lower for the off target sites and even lower for the pooled groups Blastocysts_M and Partenotes_M. with avarege really  close to zero. As can be seen in the next plot.
+
+##Read count per group
+```{r read_counts_group, out.height = "110%", out.width = "110%"}
+## Missing samples
+# Now displyaing it in shiny
+ui <- fluidPage(
+  fluidRow(
+    column(12, offset= 0, 
+       h4("Read counts per group"),
+      plotOutput("plotReads"))
+  )
+)
+# define server logic options
+server <- function(input, output) {
+ output$plotReads <- renderPlot({
+  PlotReadPerGroup(vc_all_list, metadata$Group)
+ },height = 800, width = 800 )
+}
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
