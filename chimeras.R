@@ -17,6 +17,22 @@ crispr_set <- All_sets_long_del[[1]]
 chimeras_bl04 <- getChimeras(crispr_set, sample = "BL04")
 chimeras_bl04
 
+
+
+################################################################################################################################
+# I got the function that created the crispr run to check how the chimeras are selected
+# to get the function I used : 'getMethod("readsToTarget",signature = c(reads = "GAlignments", target= "GRanges"))
+# because when you use 'showMethods(readsToTarget)' there are three different signatures, depending on the class of the parameters
+# https://rdrr.io/github/markrobinsonuzh/CrispRVariants/src/R/initialisers.R
+# https://rdrr.io/github/markrobinsonuzh/CrispRVariants/src/R/findChimeras.R
+##################################################################################
+
+#  Find chimeric reads, assuming that the GAlignments object
+#' does not contain multimapping reads. That is, read names that appear
+#' more than ones in the file are considered chimeras.  Chimeric reads
+#' are reads that cannot be mapped as a single, linear alignment.  Reads
+#' from structual rearrangements such as inversions can be mapped as chimeras.
+
 # To isolate the sequence we can tranform the GAlignment object into GRange object
 gr_chimeras_bl04 <- as(chimeras_bl04, "GRanges")
 ## then get the DNAStringSet 
@@ -40,6 +56,15 @@ cigar_bl04 <- sort(table(cigar_bl04),decreasing = T)
 most_frequent_chimera <- grep(names(cigar_bl04[1]), chimeras_bl04@cigar)
 seq_mf_chimera <- sequences[most_frequent_chimera][1]
 
+# So the reads that have duplicates are chimeras. we can combine the duplicate reads and try to blast 
+# To check the most frequent combination of cigar labels among the duplicated reads:
+
+View(crispr_set[[".->crispr_runs"]][["BL04"]][[".->chimera_combs"]])
+mf_comb_chimeras <- head(crispr_set[[".->crispr_runs"]][["BL04"]][[".->chimera_combs"]])
+
+## merging the two alignments of the same read for the most frequent combination
+
+
 # getting the DNA string of the most frequent chimera
 
 DNASt_mf_chimera <- dnas_chimeras_bl04[most_frequent_chimera[1]]
@@ -62,22 +87,36 @@ ref_seq_long_cha <- sapply(ref_seq_long, as.character)
 
 blast_mf <- blastSequences(seq_mf_chimera, database = "nr")
 head(blast_mf)
-blast_mf <- blastSequences(seq_mf_chimera, database = "nr", hitListSize = 2)
+blast_mf_2<- blastSequences(seq_mf_chimera, database = "nr", hitListSize = 2)
 blast_mf
+blast_df <- blastSequences(seq_mf_chimera, database = "nr", as = "data.frame")
 
+bl_df <- blastSequences(seq_mf_chimera, database = "nr", as = "data.frame")
 ### Using the pairwiseAlignment function from BioStrings
 
 # To use this function we need to use the DNAString/ DNAStringSet objects
+# geting the complementary reverse of the  reference sequence because the pairwise alignment only works if both sequences are on the same direction.
+
+ref2 <- readDNAStringSet("./Data/ref_seq_cr.fasta", "fasta")
+as.character(ref2[[1]])
+
+# running paorwise alignment
+
 Biostrings::pairwiseAlignment(DNASt_mf_chimera,ref_seq_long[[1]])
+Biostrings::pairwiseAlignment(DNASt_mf_chimera,reverseComplement(ref2[[1]]))
+Biostrings::pairwiseAlignment(reverseComplement(ref2[[1]]),ref_seq_long[[1]])
 
 # To do the pairwise alignemet with the sequences of the off-target sites
 
-AlignTest <- lapply(ref_seq_long, FUN = function(ref) {x = pairwiseAlignment(DNASt_mf_chimera, ref)
+AlignTest <- lapply(ref_seq_long, FUN = function(ref) {x = pairwiseAlignment(DNASt_mf_chimera, ref)})
 
 # This is an object PairwiseAlignmentsSingleSubject and there are function to used in this type of the object
 
 as.matrix(AlignTest)
 nchar(AlignTest)
+
+
+#DECIPHER
 
 
 
