@@ -1,0 +1,31 @@
+get_seq_strand <- function(grange) {
+	list_strand <- strand(grange)@values
+	stringset <- grange$seq
+	sequences <- sapply(stringset, as.character)
+ return(list(stringset, list_strand,sequences))
+}
+
+seq_mf_chimera_func <- function(list_seq_info = str_info, most_freq_chimera_index =  )
+
+getMostFreqComb <- function(chimeras = chimeras_bl04, nb_comb = 1) {
+  mf_freq_comb <- as.character(crispr_set[[".->crispr_runs"]][["BL04"]][[".->chimera_combs"]][1:nb_comb,1])
+  mf_freq_comb <- str_split(mf_freq_comb,";")
+  cigar <- chimeras4@cigar
+  for(i in 1:nb_comb) {
+  mf_pos <- mf_freq_comb[[i]]
+  first_cigar <- grep(mf_pos[1], cigar)
+  second_cigar <- grep(mf_pos[2], cigar)
+  ord_cigar <- which(second_cigar %in% (first_cigar + 1))[1]
+  ind_sec<- second_cigar[ord_cigar]
+  ind_first <- (ind_sec - 1)
+  dna_st_merged <- list()
+  # check if they are from the same reads
+  if(names(chimeras_bl04)[ind_first] == names(chimeras)[ind_sec]) {
+    dna_st <- as(chimeras[ind_first:ind_sec],"GRanges")
+    dna_st <- dna_st$seq
+    dna_st_merged[[i]] <- xscat(dna_st[1],dna_st[2])
+  }
+  }
+  return(dna_st_merged)
+  
+}
