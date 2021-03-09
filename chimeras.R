@@ -9,7 +9,7 @@ library(ggmsa)
 library(annotate)
 library(Biostrings)
 # loading the crisprset object
-load("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R/Data/CrisprSets_log_del.RData")
+load("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R/Data/CrisprSets_long_del.RData")
 # getting the crispr_set for NGN3
 crispr_set <- All_sets_long_del[[1]] 
 
