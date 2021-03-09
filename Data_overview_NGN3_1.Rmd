@@ -40,7 +40,7 @@ library("psych")
 ```
 
 ```{r functions, echo = FALSE, include=FALSE}
-import::here(.from = "D:/Raquel/Desktop/Post_doc/Codes/annotation_visualization_lib.R",
+import::here(.from = "./Codes/annotation_visualization_lib.R",
              plotAnnotation_Mod,
              arrangePlots,
              mut.efficiency,
@@ -69,7 +69,7 @@ Samples from blastocysts derivides from IVF (BL) or parthenogenesis (PT) were an
 setwd("D:/Raquel/Desktop/Post_doc/NGN3/NGN3_R")
 
 # Read samples files, each .bam file are the reads for all (target/offtarget) sites for one sample.
-readfiles<-list.files("./Bam")
+# readfiles<-list.files("./Bam")
 
 # Loading reference, GRange objects, trancript database and metadatas
 ## I saved the fasta files with the reference sequences and the GRange objects of the target / off target regions in a .RData file
